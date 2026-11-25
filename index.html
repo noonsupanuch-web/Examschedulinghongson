@@ -380,7 +380,7 @@
 
         // วาง URL เว็บแอปของ Google Apps Script ที่นี่ (ลงท้ายด้วย /exec) หากเปิดไฟล์ HTML นอก Google Apps Script
         // หากนำไฟล์นี้ไปวางเป็น Index.html ใน Google Apps Script ระบบจะเชื่อมต่อฐานข้อมูลให้อัตโนมัติ
-        const DEFAULT_GAS_API_URL = '';
+        const DEFAULT_GAS_API_URL = 'https://script.google.com/macros/s/AKfycbzwJbbzlTBAc8wgnNErXngJr0BotHkse0XmIHDp65z1KEYWntRtLjYCKR6euHPz6Bsq/exec';
 
         const THEME_PRESETS = [
             { id: 'navy', name: 'น้ำเงินราชการ', primary: '#1e3a8a', accent: '#2563eb', soft: '#eff6ff' },
@@ -746,8 +746,8 @@
         function loadState() {
             try {
                 const savedGasUrl = localStorage.getItem(GAS_URL_STORAGE_KEY);
-                if (savedGasUrl !== null && !DEFAULT_GAS_API_URL) {
-                    state.gasApiUrl = savedGasUrl;
+                if (savedGasUrl && savedGasUrl.trim()) {
+                    state.gasApiUrl = savedGasUrl.trim();
                 }
                 const raw = localStorage.getItem(STORAGE_KEY);
                 if (!raw) return;
@@ -810,22 +810,6 @@
                     } else {
                         icon.className = 'fas fa-cloud text-emerald-300';
                         text.textContent = state.cloudStatusLabel || 'ซิงค์ Sheets แล้ว';
-                    }
-                }
-            }
-
-            const loginBadge = document.getElementById('login-cloud-badge');
-            if (loginBadge) {
-                if (!isCloudEnabled()) {
-                    loginBadge.classList.add('hidden');
-                } else {
-                    loginBadge.classList.remove('hidden');
-                    if (state.cloudStatus === 'syncing') {
-                        loginBadge.innerHTML = `<i class="fas fa-sync-alt fa-spin text-amber-600"></i> กำลังซิงค์ข้อมูลล่าสุดจาก Google Sheets...`;
-                    } else if (state.cloudStatus === 'error') {
-                        loginBadge.innerHTML = `<i class="fas fa-exclamation-triangle text-red-500"></i> ไม่สามารถเชื่อมต่อ Google Sheets ได้ชั่วคราว`;
-                    } else {
-                        loginBadge.innerHTML = `<i class="fas fa-check-circle text-emerald-600"></i> เชื่อมต่อฐานข้อมูลออนไลน์ Google Sheets พร้อมใช้งาน`;
                     }
                 }
             }
@@ -1220,26 +1204,38 @@
                                     class="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition">
                             </div>
                         </div>
-                        <button type="submit" class="w-full theme-btn py-3 rounded-xl font-bold text-sm sm:text-base shadow-md transition flex items-center justify-center gap-2 mt-2">
+                        <button type="submit" class="w-full theme-btn py-3 rounded-xl text-sm font-bold shadow-md transition flex items-center justify-center gap-2 mt-2">
                             <i class="fas fa-sign-in-alt"></i> เข้าสู่ระบบ
                         </button>
-                        <div id="login-cloud-badge" class="hidden pt-2 text-center text-[11px] font-semibold text-gray-600 flex items-center justify-center gap-1.5"></div>
                     </form>
                 </div>
             `;
-            updateCloudStatusUI();
         }
 
-        function handleLogin(e) {
+        async function handleLogin(e) {
             e.preventDefault();
             const username = document.getElementById('login-username').value.trim();
             const password = document.getElementById('login-password').value.trim();
 
-            const user = state.users.find(
+            let user = state.users.find(
                 u => u.username.toLowerCase() === username.toLowerCase() && u.password === password
             );
 
+            // หากยังไม่พบในเครื่องและเชื่อมต่อ Google Sheets อยู่ ให้ดึงรายชื่อล่าสุดจาก Sheets มาตรวจสอบก่อน
+            if (!user && isCloudEnabled()) {
+                const submitBtn = e.target?.querySelector('button[type="submit"]');
+                if (submitBtn) {
+                    submitBtn.disabled = true;
+                    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังตรวจสอบข้อมูลจาก Google Sheets...';
+                }
+                await syncFromCloud(true);
+                user = state.users.find(
+                    u => u.username.toLowerCase() === username.toLowerCase() && u.password === password
+                );
+            }
+
             if (!user) {
+                render();
                 showToast('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง', 'error');
                 return;
             }
@@ -1645,7 +1641,7 @@
                     if (sub.teachers.length === 0) {
                         state.subjects = state.subjects.filter(s => s.id !== subjectId);
                     }
-                    saveState();
+                    saveState('saveSubjects', { subjects: state.subjects });
                     showToast('ลบข้อมูลเรียบร้อยแล้ว', 'info');
                     render();
                 }
@@ -1660,7 +1656,7 @@
                 `ต้องการลบรายวิชา ${sub.code} ${sub.name} ออกจากระบบทั้งหมดใช่หรือไม่?`,
                 () => {
                     state.subjects = state.subjects.filter(s => s.id !== subjectId);
-                    saveState();
+                    saveState('saveSubjects', { subjects: state.subjects });
                     showToast(`ลบรายวิชา ${sub.code} เรียบร้อยแล้ว`, 'info');
                     render();
                 }
@@ -1861,7 +1857,7 @@
 
         function togglePublishSchedule() {
             state.isSchedulePublished = !state.isSchedulePublished;
-            saveState();
+            saveState('saveSettings', { settings: state.settings, isSchedulePublished: state.isSchedulePublished });
             showToast(
                 state.isSchedulePublished ? 'เปิดแสดงตารางสอบให้ครูเรียบร้อยแล้ว' : 'ปิดการแสดงตารางสอบชั่วคราวแล้ว',
                 state.isSchedulePublished ? 'success' : 'warning'
@@ -1926,7 +1922,7 @@
                 }
             });
 
-            saveState();
+            saveState('saveSubjects', { subjects: state.subjects });
             if (!silent) {
                 showToast(`จัดตารางอัตโนมัติชั้น ${grade.short} สำเร็จ ${count} รายวิชา`, 'success');
                 render();
@@ -1939,7 +1935,7 @@
             GRADE_GROUPS.forEach(g => {
                 total += autoScheduleGrade(g.id, true);
             });
-            saveState();
+            saveState('saveSubjects', { subjects: state.subjects });
             if (total > 0) {
                 showToast(`จัดตารางสอบอัตโนมัติทุกชั้นเรียบร้อยแล้ว (${total} รายวิชา)`, 'success');
             } else {
@@ -1960,7 +1956,7 @@
                             s.slotId = null;
                         }
                     });
-                    saveState();
+                    saveState('saveSubjects', { subjects: state.subjects });
                     showToast(`ล้างตารางสอบ ${grade.short} เรียบร้อยแล้ว`, 'info');
                     render();
                 }
@@ -1999,7 +1995,7 @@
             if (!sub) return;
             sub.dayIndex = null;
             sub.slotId = null;
-            saveState();
+            saveState('saveSubjects', { subjects: state.subjects });
             showToast(`นำวิชา ${sub.code} ออกจากตารางแล้ว`, 'info');
             render();
         }
@@ -2066,7 +2062,7 @@
             if (!sub) return;
             sub.dayIndex = dayIndex;
             sub.slotId = slotId;
-            saveState();
+            saveState('saveSubjects', { subjects: state.subjects });
             const days = getDaysForGrade(sub.gradeId);
             showToast(`ย้ายวิชา ${sub.code} ไปที่ ${days[dayIndex]} (${getSlotLabel(slotId, sub.duration)})`, 'success');
             render();
@@ -2078,7 +2074,7 @@
             if (sub) {
                 sub.dayIndex = null;
                 sub.slotId = null;
-                saveState();
+                saveState('saveSubjects', { subjects: state.subjects });
                 showToast(`นำวิชา ${sub.code} ออกจากตารางแล้ว`, 'info');
             }
             closeSlotModal();
@@ -2165,7 +2161,7 @@
         function updateExportStyle(key, value) {
             state.settings[key] = value;
             applyTheme();
-            saveState();
+            saveState('saveSettings', { settings: state.settings, isSchedulePublished: state.isSchedulePublished });
             render();
         }
 
@@ -3109,7 +3105,7 @@
 
         function setExamType(examType) {
             state.settings.examType = examType;
-            saveState();
+            saveState('saveSettings', { settings: state.settings, isSchedulePublished: state.isSchedulePublished });
             showToast(`เปลี่ยนหัวข้อเป็น "ตารางสอบ${examType}" เรียบร้อยแล้ว`, 'success');
             render();
         }
@@ -3127,7 +3123,7 @@
                 document.getElementById('set-upper-1').value.trim(),
                 document.getElementById('set-upper-2').value.trim()
             ];
-            saveState();
+            saveState('saveSettings', { settings: state.settings, isSchedulePublished: state.isSchedulePublished });
             showToast('บันทึกข้อมูลโรงเรียนและวันสอบเรียบร้อยแล้ว', 'success');
             render();
         }
@@ -3162,7 +3158,7 @@
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, w, h);
                     state.settings.logoDataUrl = canvas.toDataURL('image/png');
-                    saveState();
+                    saveState('saveSettings', { settings: state.settings, isSchedulePublished: state.isSchedulePublished });
                     showToast('อัปโหลดตราโรงเรียนเรียบร้อยแล้ว', 'success');
                     render();
                 };
@@ -3173,7 +3169,7 @@
 
         function removeLogo() {
             state.settings.logoDataUrl = '';
-            saveState();
+            saveState('saveSettings', { settings: state.settings, isSchedulePublished: state.isSchedulePublished });
             showToast('ลบตราโรงเรียนเรียบร้อยแล้ว', 'info');
             render();
         }
@@ -3185,7 +3181,7 @@
             state.settings.themeAccent = p.accent;
             state.settings.themeSoft = p.soft;
             applyTheme();
-            saveState();
+            saveState('saveSettings', { settings: state.settings, isSchedulePublished: state.isSchedulePublished });
             showToast(`เปลี่ยนธีมสีเป็น "${p.name}" แล้ว`, 'success');
             render();
         }
@@ -3197,7 +3193,7 @@
             state.settings.themeAccent = accent;
             state.settings.themeSoft = '#f1f5f9';
             applyTheme();
-            saveState();
+            saveState('saveSettings', { settings: state.settings, isSchedulePublished: state.isSchedulePublished });
             render();
         }
 
@@ -3214,7 +3210,7 @@
                 return;
             }
             state.users.push({ id: 'u_' + Date.now(), username, password, name, department, role });
-            saveState();
+            saveState('saveUsers', { users: state.users });
             showToast(`เพิ่มบัญชี ${username} (${department}) เรียบร้อยแล้ว`, 'success');
             render();
         }
@@ -3325,7 +3321,7 @@
                 `ต้องการลบบัญชี "${u.name}" (${u.username}) ออกจากระบบใช่หรือไม่?`,
                 () => {
                     state.users = state.users.filter(item => item.id !== userId);
-                    saveState();
+                    saveState('saveUsers', { users: state.users });
                     showToast(`ลบบัญชี ${u.username} เรียบร้อยแล้ว`, 'info');
                     render();
                 }
@@ -3336,7 +3332,7 @@
             const input = document.getElementById('sheet-url-input');
             const rawUrl = (input ? input.value.trim() : '') || state.settings.sheetUrl;
             state.settings.sheetUrl = rawUrl;
-            saveState();
+            saveState('saveSettings', { settings: state.settings, isSchedulePublished: state.isSchedulePublished });
 
             const matchId = rawUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
             if (!matchId) {
@@ -3357,7 +3353,7 @@
                     throw new Error('Sheet is private');
                 }
                 const { added, updated } = parseUsersFromCSVText(text);
-                saveState();
+                saveState('saveUsers', { users: state.users });
                 showToast(`ซิงค์สำเร็จ: เพิ่มใหม่ ${added} คน, อัปเดต ${updated} คน`, 'success');
                 render();
             } catch (err) {
@@ -3372,7 +3368,7 @@
             const reader = new FileReader();
             reader.onload = (e) => {
                 const { added, updated } = parseUsersFromCSVText(e.target.result || '');
-                saveState();
+                saveState('saveUsers', { users: state.users });
                 showToast(`นำเข้า CSV สำเร็จ: เพิ่มใหม่ ${added} คน, อัปเดต ${updated} คน`, 'success');
                 render();
             };
@@ -3467,6 +3463,7 @@
                     state.subjects = JSON.parse(JSON.stringify(INITIAL_SUBJECTS));
                     state.isSchedulePublished = true;
                     applyTheme();
+                    saveState('saveAll');
                     showToast('รีเซ็ตข้อมูลกลับเป็นค่าเริ่มต้นเรียบร้อยแล้ว', 'success');
                     render();
                 }
