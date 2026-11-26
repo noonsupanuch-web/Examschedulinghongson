@@ -8,6 +8,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- html2canvas for High-Res PNG Export -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- JSZip for Term Archive Folder (.ZIP) Export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <!-- Font Awesome Icons -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <!-- Thai Fonts for UI & Document Export -->
@@ -366,6 +368,64 @@
         </div>
     </div>
 
+    <!-- Grade Custom Exam Days & Time Slots Modal -->
+    <div id="grade-config-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4 no-print">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[92vh] flex flex-col border border-gray-200 overflow-hidden">
+            <div class="theme-bg text-white px-5 py-4 flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <i class="fas fa-sliders-h"></i>
+                    <div>
+                        <h3 class="font-bold text-base">ตั้งค่าระดับชั้น วันสอบ และช่วงเวลาสอบเฉพาะชั้น</h3>
+                        <p id="grade-config-subtitle" class="text-xs text-white/80">กำหนดวันและเวลาสอบแยกเฉพาะระดับชั้นนี้ได้หากสอบไม่ตรงกับชั้นอื่น</p>
+                    </div>
+                </div>
+                <button type="button" onclick="closeGradeConfigModal()" class="w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center text-white transition">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div id="grade-config-body" class="p-4 sm:p-5 overflow-y-auto space-y-5">
+                <!-- Rendered dynamically -->
+            </div>
+            <div class="p-4 border-t border-gray-200 bg-gray-50 flex justify-end gap-2">
+                <button type="button" onclick="closeGradeConfigModal()" class="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-gray-200 hover:bg-gray-300 text-gray-700 transition">
+                    ยกเลิก
+                </button>
+                <button type="button" onclick="saveGradeConfigModal()" class="theme-btn px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-sm transition flex items-center gap-1.5">
+                    <i class="fas fa-save"></i> บันทึกการตั้งค่าชั้นนี้
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Archive / New Term / Safe Clear Data Confirmation Modal -->
+    <div id="term-archive-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 p-4 no-print">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-xl w-full max-h-[92vh] flex flex-col border border-gray-200 overflow-hidden">
+            <div id="term-modal-header" class="theme-bg text-white px-5 py-4 flex items-center justify-between">
+                <div class="flex items-center gap-2.5">
+                    <i id="term-modal-icon" class="fas fa-folder-plus text-xl"></i>
+                    <div>
+                        <h3 id="term-modal-title" class="font-bold text-base">บันทึกโฟลเดอร์เทอมและเริ่มเทอมใหม่</h3>
+                        <p id="term-modal-desc" class="text-xs text-white/85 mt-0.5">ตรวจสอบและยืนยันก่อนบันทึกหรือล้างข้อมูล</p>
+                    </div>
+                </div>
+                <button type="button" onclick="closeTermArchiveModal()" class="w-9 h-9 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center text-white transition">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div id="term-modal-body" class="p-4 sm:p-5 overflow-y-auto space-y-4">
+                <!-- Rendered dynamically -->
+            </div>
+            <div class="p-4 border-t border-gray-200 bg-gray-50 flex justify-end gap-2">
+                <button type="button" onclick="closeTermArchiveModal()" class="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-gray-200 hover:bg-gray-300 text-gray-700 transition">
+                    ยกเลิก
+                </button>
+                <button type="button" id="term-modal-confirm-btn" onclick="executeTermArchiveAction()" class="theme-btn px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-sm transition flex items-center gap-1.5">
+                    <i class="fas fa-check-circle"></i> ยืนยันดำเนินการ
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Hidden Off-Screen Container for Crisp Desktop-Width PNG Export on Mobile -->
     <div id="png-export-stage" class="fixed -left-[9999px] top-0 bg-white p-8" style="width: 960px;"></div>
 
@@ -412,19 +472,19 @@
             { label: 'Chakra Petch (จักรเพชร)', value: "'Chakra Petch', sans-serif", wordName: 'Chakra Petch' }
         ];
 
-        const GRADE_GROUPS = [
-            { id: 'm1', name: 'ชั้นมัธยมศึกษาปีที่ 1', short: 'ม.1', level: 'lower' },
-            { id: 'm2', name: 'ชั้นมัธยมศึกษาปีที่ 2', short: 'ม.2', level: 'lower' },
-            { id: 'm3', name: 'ชั้นมัธยมศึกษาปีที่ 3', short: 'ม.3', level: 'lower' },
-            { id: 'm4_sci', name: 'ชั้นมัธยมศึกษาปีที่ 4/1 - 4/5', short: 'ม.4/1-5', level: 'upper' },
-            { id: 'm4_art', name: 'ชั้นมัธยมศึกษาปีที่ 4/6 - 4/10', short: 'ม.4/6-10', level: 'upper' },
-            { id: 'm5_sci', name: 'ชั้นมัธยมศึกษาปีที่ 5/1 - 5/5', short: 'ม.5/1-5', level: 'upper' },
-            { id: 'm5_art', name: 'ชั้นมัธยมศึกษาปีที่ 5/6 - 5/10', short: 'ม.5/6-10', level: 'upper' },
-            { id: 'm6_sci', name: 'ชั้นมัธยมศึกษาปีที่ 6/1 - 6/5', short: 'ม.6/1-5', level: 'upper' },
-            { id: 'm6_art', name: 'ชั้นมัธยมศึกษาปีที่ 6/6 - 6/10', short: 'ม.6/6-10', level: 'upper' }
+        const DEFAULT_GRADE_GROUPS = [
+            { id: 'm1', name: 'ชั้นมัธยมศึกษาปีที่ 1', short: 'ม.1', level: 'lower', roomsList: ['ม.1/1', 'ม.1/2', 'ม.1/3', 'ม.1/4', 'ม.1/5', 'ม.1/6', 'ม.1/7', 'ม.1/8', 'ม.1/9'], useCustomDays: false, customDays: [], useCustomSlots: false, customSlots: [] },
+            { id: 'm2', name: 'ชั้นมัธยมศึกษาปีที่ 2', short: 'ม.2', level: 'lower', roomsList: ['ม.2/1', 'ม.2/2', 'ม.2/3', 'ม.2/4', 'ม.2/5', 'ม.2/6', 'ม.2/7', 'ม.2/8', 'ม.2/9'], useCustomDays: false, customDays: [], useCustomSlots: false, customSlots: [] },
+            { id: 'm3', name: 'ชั้นมัธยมศึกษาปีที่ 3', short: 'ม.3', level: 'lower', roomsList: ['ม.3/1', 'ม.3/2', 'ม.3/3', 'ม.3/4', 'ม.3/5', 'ม.3/6', 'ม.3/7', 'ม.3/8', 'ม.3/9'], useCustomDays: false, customDays: [], useCustomSlots: false, customSlots: [] },
+            { id: 'm4_sci', name: 'ชั้นมัธยมศึกษาปีที่ 4/1 - 4/5', short: 'ม.4/1-5', level: 'upper', roomsList: ['ม.4/1', 'ม.4/2', 'ม.4/3', 'ม.4/4', 'ม.4/5'], useCustomDays: false, customDays: [], useCustomSlots: false, customSlots: [] },
+            { id: 'm4_art', name: 'ชั้นมัธยมศึกษาปีที่ 4/6 - 4/10', short: 'ม.4/6-10', level: 'upper', roomsList: ['ม.4/6', 'ม.4/7', 'ม.4/8', 'ม.4/9', 'ม.4/10'], useCustomDays: false, customDays: [], useCustomSlots: false, customSlots: [] },
+            { id: 'm5_sci', name: 'ชั้นมัธยมศึกษาปีที่ 5/1 - 5/5', short: 'ม.5/1-5', level: 'upper', roomsList: ['ม.5/1', 'ม.5/2', 'ม.5/3', 'ม.5/4', 'ม.5/5'], useCustomDays: false, customDays: [], useCustomSlots: false, customSlots: [] },
+            { id: 'm5_art', name: 'ชั้นมัธยมศึกษาปีที่ 5/6 - 5/10', short: 'ม.5/6-10', level: 'upper', roomsList: ['ม.5/6', 'ม.5/7', 'ม.5/8', 'ม.5/9', 'ม.5/10'], useCustomDays: false, customDays: [], useCustomSlots: false, customSlots: [] },
+            { id: 'm6_sci', name: 'ชั้นมัธยมศึกษาปีที่ 6/1 - 6/5', short: 'ม.6/1-5', level: 'upper', roomsList: ['ม.6/1', 'ม.6/2', 'ม.6/3', 'ม.6/4', 'ม.6/5'], useCustomDays: false, customDays: [], useCustomSlots: false, customSlots: [] },
+            { id: 'm6_art', name: 'ชั้นมัธยมศึกษาปีที่ 6/6 - 6/10', short: 'ม.6/6-10', level: 'upper', roomsList: ['ม.6/6', 'ม.6/7', 'ม.6/8', 'ม.6/9', 'ม.6/10'], useCustomDays: false, customDays: [], useCustomSlots: false, customSlots: [] }
         ];
 
-        const TIME_SLOTS = [
+        const DEFAULT_TIME_SLOTS = [
             { id: 's1', label: '09.00-10.00 น.', startMin: 540, period: 'morning' },
             { id: 's2', label: '10.00-11.00 น.', startMin: 600, period: 'morning' },
             { id: 's3', label: '11.00-11.30 น.', startMin: 660, period: 'morning' },
@@ -696,8 +756,58 @@
                 exportFontWeight: '400',
                 sheetUrl: DEFAULT_SHEET_URL,
                 lowerDays: ['อังคาร 29 กันยายน 2569', 'พฤหัสบดี 1 ตุลาคม 2569'],
-                upperDays: ['จันทร์ 28 กันยายน 2569', 'พุธ 30 กันยายน 2569', 'ศุกร์ 2 ตุลาคม 2569']
+                upperDays: ['จันทร์ 28 กันยายน 2569', 'พุธ 30 กันยายน 2569', 'ศุกร์ 2 ตุลาคม 2569'],
+                gradeGroups: JSON.parse(JSON.stringify(DEFAULT_GRADE_GROUPS)),
+                defaultTimeSlots: JSON.parse(JSON.stringify(DEFAULT_TIME_SLOTS))
             };
+        }
+
+        function ensureSettingsIntegrity(settingsObj) {
+            const merged = Object.assign(createDefaultSettings(), settingsObj || {});
+            if (!Array.isArray(merged.lowerDays) || merged.lowerDays.length === 0) {
+                merged.lowerDays = createDefaultSettings().lowerDays;
+            }
+            if (!Array.isArray(merged.upperDays) || merged.upperDays.length === 0) {
+                merged.upperDays = createDefaultSettings().upperDays;
+            }
+            if (!Array.isArray(merged.gradeGroups) || merged.gradeGroups.length === 0) {
+                merged.gradeGroups = JSON.parse(JSON.stringify(DEFAULT_GRADE_GROUPS));
+            } else {
+                merged.gradeGroups = merged.gradeGroups.map(g => ({
+                    id: g.id,
+                    name: g.name || g.short || 'ไม่ระบุชั้น',
+                    short: g.short || g.name || 'ม.',
+                    level: g.level || 'lower',
+                    roomsList: Array.isArray(g.roomsList) && g.roomsList.length > 0 ? g.roomsList : inferDefaultRoomsForGrade(g),
+                    useCustomDays: Boolean(g.useCustomDays),
+                    customDays: Array.isArray(g.customDays) ? g.customDays : [],
+                    useCustomSlots: Boolean(g.useCustomSlots),
+                    customSlots: Array.isArray(g.customSlots) ? g.customSlots : []
+                }));
+            }
+            if (!Array.isArray(merged.defaultTimeSlots) || merged.defaultTimeSlots.length === 0) {
+                merged.defaultTimeSlots = JSON.parse(JSON.stringify(DEFAULT_TIME_SLOTS));
+            }
+            return merged;
+        }
+
+        function inferDefaultRoomsForGrade(g) {
+            const defMatch = DEFAULT_GRADE_GROUPS.find(d => d.id === g.id);
+            if (defMatch && Array.isArray(defMatch.roomsList)) return [...defMatch.roomsList];
+            const mRange = String(g.short || g.name || '').match(/ม\.(\d+)\/(\d+)\s*-\s*(\d+)/);
+            if (mRange) {
+                const yr = mRange[1];
+                const startR = parseInt(mRange[2], 10);
+                const endR = parseInt(mRange[3], 10);
+                const arr = [];
+                for (let r = startR; r <= endR; r++) arr.push(`ม.${yr}/${r}`);
+                if (arr.length > 0) return arr;
+            }
+            const mYear = String(g.short || g.name || '').match(/ม\.(\d+)/);
+            if (mYear) {
+                return [`ม.${mYear[1]}/1`];
+            }
+            return [String(g.short || 'ห้องสอบ 1')];
         }
 
         const state = {
@@ -715,14 +825,20 @@
             exportFilterGrade: 'all',
             exportFilterTeacher: 'all',
             exportFilterSubject: 'all',
+            exportHandoverGrade: 'm1',
+            exportHandoverRoom: 'all',
             exportTeacherNamesCache: [],
             userFilterDept: 'all',
             confirmCallback: null,
             modalSubjectId: null,
             editingUserId: null,
+            editingGradeConfigId: null,
+            gradeConfigDraft: null,
+            termArchiveMode: 'archive_only', // 'archive_only' | 'new_term' | 'clear_data'
             settings: createDefaultSettings(),
             users: JSON.parse(JSON.stringify(INITIAL_USERS)),
-            subjects: JSON.parse(JSON.stringify(INITIAL_SUBJECTS))
+            subjects: JSON.parse(JSON.stringify(INITIAL_SUBJECTS)),
+            archives: []
         };
 
         function saveState(syncAction = 'saveAll', syncPayload = null) {
@@ -731,11 +847,23 @@
                     isSchedulePublished: state.isSchedulePublished,
                     settings: state.settings,
                     users: state.users,
-                    subjects: state.subjects
+                    subjects: state.subjects,
+                    archives: state.archives
                 };
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
             } catch (err) {
                 console.warn('Unable to persist state to localStorage:', err);
+                // หาก localStorage เต็มเพราะคลัง archive ให้เก็บเฉพาะข้อมูลหลักลง localStorage
+                try {
+                    const slimPayload = {
+                        isSchedulePublished: state.isSchedulePublished,
+                        settings: state.settings,
+                        users: state.users,
+                        subjects: state.subjects,
+                        archives: (state.archives || []).slice(0, 5)
+                    };
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(slimPayload));
+                } catch (e2) {}
             }
 
             if (isCloudEnabled() && syncAction) {
@@ -756,17 +884,22 @@
                     state.isSchedulePublished = parsed.isSchedulePublished;
                 }
                 if (parsed.settings && typeof parsed.settings === 'object') {
-                    state.settings = Object.assign(createDefaultSettings(), parsed.settings);
+                    state.settings = ensureSettingsIntegrity(parsed.settings);
                 }
                 if (Array.isArray(parsed.users) && parsed.users.length > 0) {
                     state.users = parsed.users;
-                    // Ensure core admin always exists
                     if (!state.users.some(u => u.username === 'krunoon')) {
                         state.users.unshift(JSON.parse(JSON.stringify(INITIAL_USERS[0])));
                     }
                 }
                 if (Array.isArray(parsed.subjects)) {
                     state.subjects = parsed.subjects;
+                }
+                if (Array.isArray(parsed.archives)) {
+                    state.archives = parsed.archives;
+                }
+                if (!state.settings.gradeGroups.some(g => g.id === state.selectedAdminGrade)) {
+                    state.selectedAdminGrade = state.settings.gradeGroups[0].id;
                 }
             } catch (err) {
                 console.warn('Unable to load persisted state:', err);
@@ -831,6 +964,8 @@
                 if (action === 'saveSubjects') return await callGASServer('apiSaveSubjects', payload.subjects);
                 if (action === 'saveUsers') return await callGASServer('apiSaveUsers', payload.users);
                 if (action === 'saveSettings') return await callGASServer('apiSaveSettings', payload.settings, payload.isSchedulePublished);
+                if (action === 'saveArchive') return await callGASServer('apiSaveArchive', payload.archive);
+                if (action === 'deleteArchive') return await callGASServer('apiDeleteArchive', payload.archiveId);
                 throw new Error('Unknown GAS action: ' + action);
             }
 
@@ -875,11 +1010,28 @@
                     state.isSchedulePublished = data.isSchedulePublished;
                 }
                 if (data.settings && typeof data.settings === 'object') {
-                    state.settings = Object.assign(createDefaultSettings(), data.settings);
+                    const localLogo = state.settings.logoDataUrl;
+                    state.settings = ensureSettingsIntegrity(data.settings);
+                    if (!state.settings.logoDataUrl && localLogo) {
+                        state.settings.logoDataUrl = localLogo;
+                    }
                 }
                 if (Array.isArray(data.subjects)) {
                     state.subjects = data.subjects;
                 }
+            }
+            if (Array.isArray(data.archives)) {
+                // รวมรายการคลังโฟลเดอร์จาก Sheets กับในเครื่อง (อิงตาม id ไม่ให้ซ้ำ)
+                const byId = new Map();
+                (state.archives || []).forEach(a => byId.set(a.id, a));
+                data.archives.forEach(a => byId.set(a.id, a));
+                state.archives = Array.from(byId.values()).sort((a, b) => String(b.archivedAt || '').localeCompare(String(a.archivedAt || '')));
+            }
+            if (!state.settings.gradeGroups.some(g => g.id === state.selectedAdminGrade)) {
+                state.selectedAdminGrade = state.settings.gradeGroups[0].id;
+            }
+            if (!state.settings.gradeGroups.some(g => g.id === state.exportHandoverGrade)) {
+                state.exportHandoverGrade = state.settings.gradeGroups[0].id;
             }
             // บันทึกสำเนาลง localStorage โดยไม่ยิงซิงค์วนกลับ
             saveState(null);
@@ -1029,16 +1181,17 @@
             container.appendChild(toast);
 
             setTimeout(() => {
-                toast.style.transition = 'opacity 0.25s ease';
                 toast.style.opacity = '0';
+                toast.style.transform = 'translateX(20px)';
+                toast.style.transition = 'all 0.25s ease';
                 setTimeout(() => toast.remove(), 260);
             }, 3400);
         }
 
         function openConfirmModal(title, message, onConfirm) {
-            document.getElementById('confirm-modal-title').textContent = title;
-            document.getElementById('confirm-modal-message').textContent = message;
             state.confirmCallback = onConfirm;
+            document.getElementById('confirm-modal-title').textContent = title || 'ยืนยันการดำเนินการ';
+            document.getElementById('confirm-modal-message').textContent = message || '';
             const modal = document.getElementById('confirm-modal');
             modal.classList.remove('hidden');
             modal.classList.add('flex');
@@ -1051,13 +1204,35 @@
             state.confirmCallback = null;
         }
 
+        function getGradeGroups() {
+            if (!Array.isArray(state.settings.gradeGroups) || state.settings.gradeGroups.length === 0) {
+                state.settings.gradeGroups = JSON.parse(JSON.stringify(DEFAULT_GRADE_GROUPS));
+            }
+            return state.settings.gradeGroups;
+        }
+
         function getGradeObj(gradeId) {
-            return GRADE_GROUPS.find(g => g.id === gradeId) || GRADE_GROUPS[0];
+            const groups = getGradeGroups();
+            return groups.find(g => g.id === gradeId) || groups[0];
         }
 
         function getDaysForGrade(gradeId) {
             const grade = getGradeObj(gradeId);
-            return grade.level === 'lower' ? state.settings.lowerDays : state.settings.upperDays;
+            if (grade.useCustomDays && Array.isArray(grade.customDays) && grade.customDays.length > 0) {
+                return grade.customDays;
+            }
+            return grade.level === 'upper' ? state.settings.upperDays : state.settings.lowerDays;
+        }
+
+        function getSlotsForGrade(gradeId) {
+            const grade = getGradeObj(gradeId);
+            if (grade.useCustomSlots && Array.isArray(grade.customSlots) && grade.customSlots.length > 0) {
+                return grade.customSlots;
+            }
+            if (!Array.isArray(state.settings.defaultTimeSlots) || state.settings.defaultTimeSlots.length === 0) {
+                state.settings.defaultTimeSlots = JSON.parse(JSON.stringify(DEFAULT_TIME_SLOTS));
+            }
+            return state.settings.defaultTimeSlots;
         }
 
         function formatMinutesToTime(totalMin) {
@@ -1066,8 +1241,18 @@
             return `${String(h).padStart(2, '0')}.${String(m).padStart(2, '0')}`;
         }
 
-        function getSlotLabel(slotId, duration) {
-            const slot = TIME_SLOTS.find(s => s.id === slotId);
+        function parseTimeStringToMin(str) {
+            const m = String(str || '').match(/(\d{1,2})[.:](\d{2})/);
+            if (!m) return null;
+            return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+        }
+
+        function getSlotLabel(slotId, duration, gradeId = null) {
+            const slots = gradeId ? getSlotsForGrade(gradeId) : (state.settings.defaultTimeSlots || DEFAULT_TIME_SLOTS);
+            let slot = slots.find(s => s.id === slotId);
+            if (!slot) {
+                slot = (state.settings.defaultTimeSlots || DEFAULT_TIME_SLOTS).find(s => s.id === slotId);
+            }
             if (!slot) return '';
             if (slot.period === 'lunch') return slot.label;
             const dur = Number(duration);
@@ -1119,6 +1304,120 @@
                 const deptText = includeDept && dept ? ` [${dept}]` : '';
                 return `${t.name}${roomsText}${deptText}`;
             }).join('  ');
+        }
+
+        function getSubjectDisplayName(sub) {
+            if (!sub) return '';
+            const baseName = String(sub.name || '').trim();
+            if (sub.isRoomSpecific && sub.targetRooms && !baseName.includes(sub.targetRooms)) {
+                return `${baseName} (เฉพาะ ${sub.targetRooms})`;
+            }
+            return baseName;
+        }
+
+        function expandThaiRooms(roomStr, gradeObj = null) {
+            if (!roomStr) return [];
+            const cleaned = String(roomStr)
+                .replace(/[–—]/g, '-')
+                .replace(/เฉพาะ/g, '')
+                .replace(/[()]/g, '')
+                .trim();
+            const results = new Set();
+            let currentYear = '';
+            if (gradeObj) {
+                const ym = String(gradeObj.short || gradeObj.name || '').match(/ม\.(\d+)/);
+                if (ym) currentYear = ym[1];
+            }
+
+            const parts = cleaned.split(/[,;]+/).map(p => p.trim()).filter(Boolean);
+            parts.forEach(part => {
+                const ym = part.match(/ม\.(\d+)/);
+                if (ym) currentYear = ym[1];
+
+                // รูปแบบ เช่น ม.1/1-1/6 หรือ ม.1/1-6 หรือ 1/1-1/6 หรือ 1/1-6
+                const rangeMatch = part.match(/(?:ม\.)?(\d+)?\/(\d+)\s*-\s*(?:(?:ม\.)?(\d+)\/)?(\d+)/);
+                if (rangeMatch) {
+                    const yr = rangeMatch[1] || rangeMatch[3] || currentYear;
+                    const startRoom = parseInt(rangeMatch[2], 10);
+                    const endRoom = parseInt(rangeMatch[4], 10);
+                    if (yr && !isNaN(startRoom) && !isNaN(endRoom) && endRoom >= startRoom && endRoom - startRoom <= 30) {
+                        for (let r = startRoom; r <= endRoom; r++) {
+                            results.add(`ม.${yr}/${r}`);
+                        }
+                        return;
+                    }
+                }
+
+                // รูปแบบห้องเดี่ยว เช่น ม.1/8 หรือ 1/9
+                const singleMatch = part.match(/(?:ม\.)?(\d+)?\/(\d+)/);
+                if (singleMatch) {
+                    const yr = singleMatch[1] || currentYear;
+                    const roomNo = parseInt(singleMatch[2], 10);
+                    if (yr && !isNaN(roomNo)) {
+                        results.add(`ม.${yr}/${roomNo}`);
+                    }
+                }
+            });
+
+            return Array.from(results);
+        }
+
+        function getRoomsForGrade(gradeId) {
+            const grade = getGradeObj(gradeId);
+            if (Array.isArray(grade.roomsList) && grade.roomsList.length > 0) {
+                return grade.roomsList;
+            }
+            return inferDefaultRoomsForGrade(grade);
+        }
+
+        function getTeacherForRoomInSubject(sub, roomName) {
+            const grade = getGradeObj(sub.gradeId);
+            const normRoom = String(roomName || '').trim();
+
+            // 1. ตรวจสอบวิชาเฉพาะห้อง
+            if (sub.isRoomSpecific && sub.targetRooms) {
+                const allowed = expandThaiRooms(sub.targetRooms, grade);
+                if (allowed.length > 0 && !allowed.includes(normRoom)) {
+                    return null;
+                }
+            } else {
+                // ตรวจสอบจากชื่อวิชาที่มีคำว่า (เฉพาะ ...)
+                const specMatch = String(sub.name || '').match(/\(เฉพาะ\s*([^)]+)\)/);
+                if (specMatch) {
+                    const allowed = expandThaiRooms(specMatch[1], grade);
+                    if (allowed.length > 0 && !allowed.includes(normRoom)) {
+                        return null;
+                    }
+                }
+            }
+
+            const teachers = sub.teachers || [];
+            if (teachers.length === 0) return '-';
+
+            // 2. ค้นหาครูที่ระบุห้องตรงกับห้องสอบนี้
+            const matchedTeachers = [];
+            let anyTeacherHasRooms = false;
+            teachers.forEach(t => {
+                const tRooms = expandThaiRooms(t.rooms || '', grade);
+                if (tRooms.length > 0) {
+                    anyTeacherHasRooms = true;
+                    if (tRooms.includes(normRoom)) {
+                        matchedTeachers.push(t.name);
+                    }
+                }
+            });
+
+            if (matchedTeachers.length > 0) {
+                return matchedTeachers.join(', ');
+            }
+
+            // หากครูทุกคนระบุห้องไว้ชัดเจนและไม่มีห้องนี้ แสดงว่าห้องนี้ไม่ได้เรียนวิชานี้
+            if (anyTeacherHasRooms && teachers.every(t => expandThaiRooms(t.rooms || '', grade).length > 0)) {
+                return null;
+            }
+
+            // กรณีไม่ได้ระบุแยกห้อง ให้แสดงครูผู้สอนทุกคนของวิชานี้
+            return teachers.map(t => t.name).join(', ');
         }
 
         function downloadCSV(filename, headers, rows) {
@@ -1176,8 +1475,8 @@
         function renderLoginView() {
             const loginEl = document.getElementById('login-screen');
             const logoHtml = state.settings.logoDataUrl
-                ? `<img src="${state.settings.logoDataUrl}" alt="ตราโรงเรียน" class="w-20 h-20 object-contain mx-auto">`
-                : `<div class="w-20 h-20 rounded-2xl theme-bg text-white flex items-center justify-center mx-auto shadow-md"><i class="fas fa-graduation-cap text-4xl"></i></div>`;
+                ? `<img src="${state.settings.logoDataUrl}" alt="ตราโรงเรียน" class="w-20 h-20 object-contain mx-auto rounded-2xl bg-white p-1.5 shadow-md">`
+                : `<div class="w-20 h-20 rounded-2xl theme-bg text-white flex items-center justify-center mx-auto shadow-md border border-white/20"><i class="fas fa-graduation-cap text-4xl"></i></div>`;
 
             loginEl.innerHTML = `
                 <div class="w-full max-w-md bg-white rounded-3xl shadow-xl border border-gray-200/80 overflow-hidden">
@@ -1347,10 +1646,11 @@
             const isAdmin = state.currentUser.role === 'admin';
             const defaultTeacherName = isAdmin ? '' : state.currentUser.name;
             const userDept = state.currentUser.department || 'ไม่ระบุกลุ่มสาระ';
+            const gradeGroups = getGradeGroups();
 
-            const gradeOptions = GRADE_GROUPS.map(g => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join('');
+            const gradeOptions = gradeGroups.map(g => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join('');
             const filterGradeOptions = `<option value="all">ทุกระดับชั้น (${state.subjects.length} วิชา)</option>` +
-                GRADE_GROUPS.map(g => {
+                gradeGroups.map(g => {
                     const cnt = state.subjects.filter(s => s.gradeId === g.id).length;
                     return `<option value="${g.id}" ${state.teacherListGradeFilter === g.id ? 'selected' : ''}>${escapeHtml(g.name)} (${cnt})</option>`;
                 }).join('');
@@ -1374,7 +1674,7 @@
                 const isScheduled = sub.dayIndex !== null && sub.slotId !== null;
                 const days = getDaysForGrade(sub.gradeId);
                 const statusBadge = isScheduled
-                    ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-700"><i class="fas fa-check-circle"></i> ${escapeHtml(days[sub.dayIndex] || '')} (${escapeHtml(getSlotLabel(sub.slotId, sub.duration))})</span>`
+                    ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-700"><i class="fas fa-check-circle"></i> ${escapeHtml(days[sub.dayIndex] || '')} (${escapeHtml(getSlotLabel(sub.slotId, sub.duration, sub.gradeId))})</span>`
                     : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-700"><i class="fas fa-clock"></i> รอจัดตาราง</span>`;
 
                 const mergedBadge = sub.teachers.length > 1
@@ -1411,8 +1711,11 @@
                             ${mergedBadge}
                         </td>
                         <td class="p-3">
-                            <div class="font-semibold text-sm text-gray-800">${escapeHtml(sub.name)}</div>
-                            <div class="mt-1">${statusBadge}</div>
+                            <div class="font-semibold text-sm text-gray-800">${escapeHtml(getSubjectDisplayName(sub))}</div>
+                            <div class="mt-1 flex flex-wrap items-center gap-1">
+                                ${statusBadge}
+                                ${sub.isRoomSpecific ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-700"><i class="fas fa-door-open"></i> เฉพาะห้อง ${escapeHtml(sub.targetRooms || '')}</span>` : ''}
+                            </div>
                         </td>
                         <td class="p-3 whitespace-nowrap text-xs font-semibold text-gray-600">${sub.duration} นาที</td>
                         <td class="p-3 min-w-[240px]">${teacherListHtml}</td>
@@ -1437,7 +1740,7 @@
                                     <i class="fas fa-edit theme-text mr-2"></i>แบบฟอร์มกรอกข้อมูลรายวิชาสอบ
                                 </h2>
                                 <p class="text-xs sm:text-sm text-gray-500 mt-1">
-                                    หากกรอก <strong>รหัสวิชาเดียวกัน</strong> ในระดับชั้นเดียวกัน ระบบจะนำชื่อครูไป <strong>สอบรวมกันโดยอัตโนมัติ</strong>
+                                    หากกรอก <strong>รหัสวิชาเดียวกัน</strong> ในระดับชั้นเดียวกัน ระบบจะนำชื่อครูไป <strong>สอบรวมกันโดยอัตโนมัติ</strong> (และสามารถระบุวิชาที่สอบเฉพาะห้องเดียวได้)
                                 </p>
                             </div>
                             <div class="flex flex-wrap items-center gap-2 self-start sm:self-auto">
@@ -1483,13 +1786,20 @@
                                     <option value="120">120 นาที</option>
                                 </select>
                             </div>
-                            <div class="lg:col-span-3">
+                            <div class="lg:col-span-2">
                                 <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อครูผู้สอน *</label>
                                 <input type="text" id="f-teacher" required value="${escapeHtml(defaultTeacherName)}" placeholder="เช่น ครูสมชาย ใจดี"
                                     class="w-full border border-gray-300 rounded-xl p-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
                             </div>
                             <div class="lg:col-span-2">
-                                <label class="block text-xs font-bold text-gray-700 mb-1">ห้องที่สอน (ถ้ามี)</label>
+                                <label class="block text-xs font-bold text-gray-700 mb-1">ขอบเขตการสอบ (ทั้งชั้น หรือ เฉพาะห้องเดียว)</label>
+                                <select id="f-room-scope" onchange="toggleRoomScopeNote()" class="w-full border border-gray-300 rounded-xl p-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                                    <option value="all">สอบปกติ (ทั้งระดับชั้น / กลุ่มนี้)</option>
+                                    <option value="specific">วิชาสอบเพิ่มเฉพาะห้องเดียว / บางห้อง</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label id="f-rooms-label" class="block text-xs font-bold text-gray-700 mb-1">ห้องที่สอน (ถ้ามี)</label>
                                 <input type="text" id="f-rooms" placeholder="เช่น ม.1/1-1/3"
                                     class="w-full border border-gray-300 rounded-xl p-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
                             </div>
@@ -1548,10 +1858,9 @@
             const gradeEl = document.getElementById('f-grade');
             const codeEl = document.getElementById('f-code');
             const nameEl = document.getElementById('f-name');
-            const durEl = document.getElementById('f-duration');
             const alertBox = document.getElementById('merge-alert-box');
             const alertText = document.getElementById('merge-alert-text');
-            if (!gradeEl || !codeEl || !alertBox) return;
+            if (!gradeEl || !codeEl || !alertBox || !alertText) return;
 
             const gradeId = gradeEl.value;
             const code = codeEl.value.trim();
@@ -1563,14 +1872,30 @@
             const existing = state.subjects.find(
                 s => s.gradeId === gradeId && s.code.toLowerCase() === code.toLowerCase()
             );
-
             if (existing) {
                 alertBox.classList.remove('hidden');
-                alertText.innerHTML = `พบวิชา <strong>${escapeHtml(existing.code)} ${escapeHtml(existing.name)}</strong> ในระดับชั้นนี้แล้ว (มีครูผู้สอน ${existing.teachers.length} คน) — เมื่อกดบันทึก ระบบจะนำชื่อครูไป <strong>สอบรวมกันในวันและเวลาเดียวกันทันที</strong>`;
-                if (nameEl && !nameEl.value.trim()) nameEl.value = existing.name;
-                if (durEl) durEl.value = String(existing.duration);
+                alertText.innerHTML = `พบรหัสวิชา <strong>${escapeHtml(existing.code)} (${escapeHtml(existing.name)})</strong> ในระดับชั้นนี้แล้ว หากบันทึก ระบบจะนำชื่อครูผู้สอนไป <strong>สอบรวมกันโดยอัตโนมัติ</strong> (ปัจจุบันมีครู ${existing.teachers.length} ท่าน)`;
+                if (nameEl && !nameEl.value.trim()) {
+                    nameEl.value = existing.name;
+                }
             } else {
                 alertBox.classList.add('hidden');
+            }
+        }
+
+        function toggleRoomScopeNote() {
+            const scope = document.getElementById('f-room-scope')?.value || 'all';
+            const label = document.getElementById('f-rooms-label');
+            const input = document.getElementById('f-rooms');
+            if (!label || !input) return;
+            if (scope === 'specific') {
+                label.innerHTML = 'ระบุห้องที่สอบเฉพาะ *';
+                input.placeholder = 'เช่น ม.1/1 หรือ ม.4/8';
+                input.required = true;
+            } else {
+                label.innerHTML = 'ห้องที่สอน (ถ้ามี)';
+                input.placeholder = 'เช่น ม.1/1-1/3';
+                input.required = false;
             }
         }
 
@@ -1581,10 +1906,16 @@
             const name = document.getElementById('f-name').value.trim();
             const duration = parseInt(document.getElementById('f-duration').value, 10) || 60;
             const teacherName = document.getElementById('f-teacher').value.trim();
+            const roomScope = document.getElementById('f-room-scope')?.value || 'all';
             const rooms = document.getElementById('f-rooms').value.trim();
+            const isRoomSpecific = roomScope === 'specific' && Boolean(rooms);
 
             if (!code || !name || !teacherName) {
                 showToast('กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน', 'warning');
+                return;
+            }
+            if (roomScope === 'specific' && !rooms) {
+                showToast('กรุณาระบุชื่อห้องสอบเฉพาะ (เช่น ม.1/1 หรือ ม.4/8)', 'warning');
                 return;
             }
 
@@ -1605,6 +1936,8 @@
                     code,
                     name,
                     duration,
+                    isRoomSpecific,
+                    targetRooms: isRoomSpecific ? rooms : '',
                     teachers: [teacherObj],
                     dayIndex: null,
                     slotId: null
@@ -1620,6 +1953,8 @@
                     code,
                     name,
                     duration,
+                    isRoomSpecific,
+                    targetRooms: isRoomSpecific ? rooms : '',
                     teacher: teacherObj
                 }
             });
@@ -1667,32 +2002,30 @@
         // 6. VIEW 2: ADMIN SCHEDULE BUILDER
         // ==========================================
         function renderAdminView() {
+            const gradeGroups = getGradeGroups();
             const selectedGrade = getGradeObj(state.selectedAdminGrade);
             const days = getDaysForGrade(selectedGrade.id);
+            const timeSlots = getSlotsForGrade(selectedGrade.id);
             const gradeSubjects = state.subjects.filter(s => s.gradeId === selectedGrade.id);
             const unscheduled = gradeSubjects.filter(s => s.dayIndex === null || s.slotId === null);
 
-            const lowerGradeBtns = GRADE_GROUPS.filter(g => g.level === 'lower').map(g => {
+            const makeGradeBtn = (g) => {
                 const unCount = state.subjects.filter(s => s.gradeId === g.id && (s.dayIndex === null || s.slotId === null)).length;
+                const hasCustom = g.useCustomDays || g.useCustomSlots;
                 return `
                     <button type="button" onclick="state.selectedAdminGrade='${g.id}'; render();"
                         class="px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border ${state.selectedAdminGrade === g.id ? 'theme-btn border-transparent shadow-sm' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}">
-                        <span>${g.short}</span>
+                        <span>${escapeHtml(g.short)}</span>
+                        ${hasCustom ? `<i class="fas fa-clock text-[10px] ${state.selectedAdminGrade === g.id ? 'text-amber-200' : 'text-amber-500'}" title="ตั้งค่าวัน/เวลาสอบเฉพาะชั้นนี้"></i>` : ''}
                         ${unCount > 0 ? `<span class="px-1.5 py-0.2 rounded-full text-[10px] ${state.selectedAdminGrade === g.id ? 'bg-white/25 text-white' : 'bg-amber-100 text-amber-700'}">${unCount}</span>` : ''}
                     </button>
                 `;
-            }).join('');
+            };
 
-            const upperGradeBtns = GRADE_GROUPS.filter(g => g.level === 'upper').map(g => {
-                const unCount = state.subjects.filter(s => s.gradeId === g.id && (s.dayIndex === null || s.slotId === null)).length;
-                return `
-                    <button type="button" onclick="state.selectedAdminGrade='${g.id}'; render();"
-                        class="px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border ${state.selectedAdminGrade === g.id ? 'theme-btn border-transparent shadow-sm' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}">
-                        <span>${g.short}</span>
-                        ${unCount > 0 ? `<span class="px-1.5 py-0.2 rounded-full text-[10px] ${state.selectedAdminGrade === g.id ? 'bg-white/25 text-white' : 'bg-amber-100 text-amber-700'}">${unCount}</span>` : ''}
-                    </button>
-                `;
-            }).join('');
+            const lowerGradeBtns = gradeGroups.filter(g => g.level === 'lower').map(makeGradeBtn).join('');
+            const upperGradeBtns = gradeGroups.filter(g => g.level === 'upper').map(makeGradeBtn).join('');
+            const customLevelGrades = gradeGroups.filter(g => g.level !== 'lower' && g.level !== 'upper');
+            const customGradeBtns = customLevelGrades.map(makeGradeBtn).join('');
 
             const unscheduledHtml = unscheduled.length > 0
                 ? unscheduled.map(sub => `
@@ -1702,7 +2035,8 @@
                             <span class="font-bold text-xs text-amber-900">${escapeHtml(sub.code)}</span>
                             <span class="px-1.5 py-0.5 rounded bg-white text-[10px] font-bold text-amber-700 border border-amber-200">${sub.duration} น.</span>
                         </div>
-                        <div class="text-xs font-semibold text-gray-800 mt-0.5 leading-snug">${escapeHtml(sub.name)}</div>
+                        <div class="text-xs font-semibold text-gray-800 mt-0.5 leading-snug">${escapeHtml(getSubjectDisplayName(sub))}</div>
+                        ${sub.isRoomSpecific ? `<span class="inline-block mt-1 px-1.5 py-0.2 rounded bg-rose-100 text-rose-700 text-[10px] font-bold"><i class="fas fa-door-open mr-0.5"></i>เฉพาะห้อง ${escapeHtml(sub.targetRooms || '')}</span>` : ''}
                         <div class="text-[11px] text-gray-500 mt-1 truncate">
                             <i class="fas fa-user-tie mr-1"></i>${escapeHtml(sub.teachers.map(t => t.name).join(', '))}
                         </div>
@@ -1717,11 +2051,11 @@
                    </div>`;
 
             const dayColumnsHtml = days.map((dayLabel, dIdx) => {
-                const slotsHtml = TIME_SLOTS.map(slot => {
+                const slotsHtml = timeSlots.map(slot => {
                     if (slot.period === 'lunch') {
                         return `
                             <div class="px-3 py-2 rounded-xl bg-gray-100 border border-gray-200 text-center text-xs font-bold text-gray-500">
-                                <i class="fas fa-utensils mr-1.5"></i>${slot.label}
+                                <i class="fas fa-utensils mr-1.5"></i>${escapeHtml(slot.label)}
                             </div>
                         `;
                     }
@@ -1729,14 +2063,17 @@
                     const placed = gradeSubjects.filter(s => s.dayIndex === dIdx && s.slotId === slot.id);
                     const placedHtml = placed.map(sub => `
                         <div draggable="true" ondragstart="handleDragStart(event, '${sub.id}')" onclick="openSlotModal('${sub.id}')"
-                            class="draggable p-2.5 rounded-xl bg-white border border-blue-200 hover:border-blue-500 shadow-sm transition cursor-pointer">
+                            class="draggable p-2.5 rounded-xl bg-white border ${sub.isRoomSpecific ? 'border-rose-300' : 'border-blue-200'} hover:border-blue-500 shadow-sm transition cursor-pointer">
                             <div class="flex items-center justify-between gap-1.5">
                                 <span class="font-bold text-xs theme-text">${escapeHtml(sub.code)}</span>
                                 <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">${sub.duration} น.</span>
                             </div>
-                            <div class="text-xs font-semibold text-gray-800 leading-snug mt-0.5">${escapeHtml(sub.name)}</div>
+                            <div class="text-xs font-semibold text-gray-800 leading-snug mt-0.5">${escapeHtml(getSubjectDisplayName(sub))}</div>
                             <div class="text-[10px] text-gray-500 mt-1 line-clamp-2">${escapeHtml(formatTeachersDisplay(sub.teachers))}</div>
-                            ${sub.teachers.length > 1 ? `<span class="inline-block mt-1 px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 text-[10px] font-bold">สอบรวม ${sub.teachers.length} คน</span>` : ''}
+                            <div class="flex flex-wrap gap-1 mt-1">
+                                ${sub.isRoomSpecific ? `<span class="inline-block px-1.5 py-0.2 rounded bg-rose-100 text-rose-700 text-[10px] font-bold">เฉพาะ ${escapeHtml(sub.targetRooms || '')}</span>` : ''}
+                                ${sub.teachers.length > 1 ? `<span class="inline-block px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 text-[10px] font-bold">สอบรวม ${sub.teachers.length} คน</span>` : ''}
+                            </div>
                         </div>
                     `).join('');
 
@@ -1745,7 +2082,7 @@
                             ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)"
                             ondrop="handleDropOnSlot(event, ${dIdx}, '${slot.id}')">
                             <div class="flex items-center justify-between text-[11px] font-bold text-gray-500">
-                                <span><i class="far fa-clock mr-1"></i>${slot.label}</span>
+                                <span><i class="far fa-clock mr-1"></i>${escapeHtml(slot.label)}</span>
                                 ${placed.length === 0 ? `<span class="text-[10px] font-normal text-gray-400">ว่าง</span>` : ''}
                             </div>
                             ${placedHtml}
@@ -1765,6 +2102,8 @@
                     </div>
                 `;
             }).join('');
+
+            const gridColsClass = days.length === 1 ? 'md:grid-cols-1' : (days.length === 2 ? 'md:grid-cols-2' : 'md:grid-cols-3');
 
             return `
                 <div class="space-y-5">
@@ -1794,15 +2133,29 @@
                     <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-5 space-y-4">
                         <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                             <div>
-                                <h2 class="text-lg font-bold text-gray-800">
-                                    <i class="fas fa-calendar-alt theme-text mr-2"></i>จัดตารางสอบ — ${escapeHtml(selectedGrade.name)}
-                                </h2>
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <h2 class="text-lg font-bold text-gray-800">
+                                        <i class="fas fa-calendar-alt theme-text mr-2"></i>จัดตารางสอบ — ${escapeHtml(selectedGrade.name)}
+                                    </h2>
+                                    ${(selectedGrade.useCustomDays || selectedGrade.useCustomSlots) ? `
+                                        <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                            <i class="fas fa-clock mr-1"></i>ใช้วัน/เวลาสอบเฉพาะชั้นนี้
+                                        </span>
+                                    ` : ''}
+                                </div>
                                 <p class="text-xs text-gray-500 mt-0.5">
-                                    ${selectedGrade.level === 'lower' ? 'ระดับ ม.ต้น (แยกวันสอบ 2 วัน: อังคาร / พฤหัสบดี)' : 'ระดับ ม.ปลาย (แยกวันสอบ 3 วัน: จันทร์ / พุธ / ศุกร์)'}
-                                    • ลากวางบนคอม หรือแตะการ์ดวิชาบนมือถือเพื่อย้ายเวลา
+                                    จำนวนวันสอบ ${days.length} วัน • ${timeSlots.filter(s => s.period !== 'lunch').length} ช่วงเวลาสอบ • ลากวางบนคอม หรือแตะการ์ดวิชาบนมือถือเพื่อย้ายเวลา
                                 </p>
                             </div>
                             <div class="flex flex-wrap gap-2">
+                                <button type="button" onclick="openGradeConfigModal('${selectedGrade.id}')"
+                                    class="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5">
+                                    <i class="fas fa-sliders-h"></i> ปรับวัน/เวลาสอบเฉพาะชั้นนี้
+                                </button>
+                                <button type="button" onclick="switchView('settings')"
+                                    class="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5">
+                                    <i class="fas fa-plus-circle"></i> เพิ่มวัน / เพิ่ม ม.
+                                </button>
                                 <button type="button" onclick="autoScheduleGrade('${selectedGrade.id}')"
                                     class="theme-btn px-3.5 py-2 rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-1.5">
                                     <i class="fas fa-magic"></i> จัดอัตโนมัติ (ชั้นนี้)
@@ -1827,6 +2180,12 @@
                                 <span class="text-xs font-bold text-violet-700 bg-violet-50 px-2.5 py-1 rounded-lg mr-1">ม.ปลาย</span>
                                 ${upperGradeBtns}
                             </div>
+                            ${customLevelGrades.length > 0 ? `
+                                <div class="flex flex-wrap items-center gap-1.5">
+                                    <span class="text-xs font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg mr-1">กลุ่มสอบพิเศษ/อื่นๆ</span>
+                                    ${customGradeBtns}
+                                </div>
+                            ` : ''}
                         </div>
                     </div>
 
@@ -1847,7 +2206,7 @@
                         </div>
 
                         <!-- Schedule Columns -->
-                        <div class="lg:col-span-9 grid grid-cols-1 ${days.length === 2 ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-4">
+                        <div class="lg:col-span-9 grid grid-cols-1 ${gridColsClass} gap-4">
                             ${dayColumnsHtml}
                         </div>
                     </div>
@@ -1868,7 +2227,7 @@
         function autoScheduleGrade(gradeId, silent = false) {
             const grade = getGradeObj(gradeId);
             const days = getDaysForGrade(gradeId);
-            const validSlots = TIME_SLOTS.filter(s => s.period !== 'lunch');
+            const validSlots = getSlotsForGrade(gradeId).filter(s => s.period !== 'lunch');
             const gradeSubjects = state.subjects.filter(s => s.gradeId === gradeId);
             const unscheduled = gradeSubjects.filter(s => s.dayIndex === null || s.slotId === null);
 
@@ -1879,7 +2238,7 @@
 
             let count = 0;
             unscheduled.forEach(sub => {
-                // First, check if the exact same subject code is already scheduled in a sibling grade (same level)
+                // ตรวจสอบรหัสวิชาเดียวกันในระดับเดียวกันที่จัดไปแล้ว เพื่อให้สอบพร้อมกัน
                 const siblingScheduled = state.subjects.find(
                     other => other.id !== sub.id &&
                         other.code.toLowerCase() === sub.code.toLowerCase() &&
@@ -1888,10 +2247,11 @@
                 );
 
                 if (siblingScheduled) {
+                    const slotExistsInThisGrade = validSlots.some(vs => vs.id === siblingScheduled.slotId);
                     const slotOccupied = gradeSubjects.some(
                         s => s.dayIndex === siblingScheduled.dayIndex && s.slotId === siblingScheduled.slotId
                     );
-                    if (!slotOccupied && siblingScheduled.dayIndex < days.length) {
+                    if (slotExistsInThisGrade && !slotOccupied && siblingScheduled.dayIndex < days.length) {
                         sub.dayIndex = siblingScheduled.dayIndex;
                         sub.slotId = siblingScheduled.slotId;
                         count++;
@@ -1899,7 +2259,7 @@
                     }
                 }
 
-                // Otherwise pick the first available slot balancing across days
+                // เลือกช่องว่างแบบกระจายวันสอบ
                 let placed = false;
                 for (let sIdx = 0; sIdx < validSlots.length && !placed; sIdx++) {
                     for (let dIdx = 0; dIdx < days.length && !placed; dIdx++) {
@@ -1914,8 +2274,7 @@
                     }
                 }
 
-                // Fallback: if all slots are full, put in last slot of last day
-                if (!placed) {
+                if (!placed && validSlots.length > 0 && days.length > 0) {
                     sub.dayIndex = days.length - 1;
                     sub.slotId = validSlots[validSlots.length - 1].id;
                     count++;
@@ -1932,7 +2291,7 @@
 
         function autoScheduleAll() {
             let total = 0;
-            GRADE_GROUPS.forEach(g => {
+            getGradeGroups().forEach(g => {
                 total += autoScheduleGrade(g.id, true);
             });
             saveState('saveSubjects', { subjects: state.subjects });
@@ -2007,10 +2366,10 @@
             state.modalSubjectId = subjectId;
 
             const days = getDaysForGrade(sub.gradeId);
-            const validSlots = TIME_SLOTS.filter(s => s.period !== 'lunch');
+            const validSlots = getSlotsForGrade(sub.gradeId).filter(s => s.period !== 'lunch');
             const gradeSubjects = state.subjects.filter(s => s.gradeId === sub.gradeId);
 
-            document.getElementById('slot-modal-subject-info').textContent = `${sub.code} ${sub.name} (${sub.duration} นาที)`;
+            document.getElementById('slot-modal-subject-info').textContent = `${sub.code} ${getSubjectDisplayName(sub)} (${sub.duration} นาที)`;
             const unschedBtn = document.getElementById('slot-modal-unschedule-btn');
             if (sub.dayIndex !== null && sub.slotId !== null) {
                 unschedBtn.classList.remove('hidden');
@@ -2018,11 +2377,34 @@
                 unschedBtn.classList.add('hidden');
             }
 
-            const bodyHtml = days.map((dayLabel, dIdx) => {
+            const roomScopeEditorHtml = `
+                <div class="p-3 rounded-xl bg-rose-50/70 border border-rose-200 space-y-2">
+                    <label class="flex items-center gap-2 cursor-pointer text-xs font-bold text-rose-900">
+                        <input type="checkbox" id="modal-sub-room-specific" ${sub.isRoomSpecific ? 'checked' : ''}
+                            onchange="document.getElementById('modal-sub-target-rooms').disabled = !this.checked;"
+                            class="w-4 h-4 rounded accent-rose-600">
+                        <span>วิชานี้สอบเพิ่มเฉพาะบางห้อง / ห้องเดียว</span>
+                    </label>
+                    <div class="flex gap-2">
+                        <input type="text" id="modal-sub-target-rooms" value="${escapeHtml(sub.targetRooms || '')}"
+                            ${sub.isRoomSpecific ? '' : 'disabled'}
+                            placeholder="ระบุห้อง เช่น ม.1/1 หรือ ม.4/8"
+                            class="flex-grow border border-rose-300 rounded-lg px-2.5 py-1.5 text-xs bg-white disabled:bg-gray-100 outline-none">
+                        <button type="button" onclick="saveModalSubjectRoomScope()"
+                            class="px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white transition flex-shrink-0">
+                            บันทึกห้อง
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            const bodyHtml = roomScopeEditorHtml + days.map((dayLabel, dIdx) => {
                 const btns = validSlots.map(slot => {
                     const isCurrent = sub.dayIndex === dIdx && sub.slotId === slot.id;
                     const others = gradeSubjects.filter(s => s.id !== sub.id && s.dayIndex === dIdx && s.slotId === slot.id);
-                    const occText = others.length > 0 ? `มี ${others.map(o => o.code).join(', ')}` : 'ว่าง';
+                    const occText = others.length > 0
+                        ? `มี ${others.map(o => o.code + (o.isRoomSpecific ? ` (${o.targetRooms})` : '')).join(', ')}`
+                        : 'ว่าง';
                     return `
                         <button type="button" onclick="assignSubjectToSlot('${sub.id}', ${dIdx}, '${slot.id}'); closeSlotModal();"
                             class="p-2.5 rounded-xl border text-left transition ${isCurrent ? 'theme-btn border-transparent shadow-sm' : 'bg-white border-gray-200 hover:border-blue-400 hover:bg-blue-50/40'}">
@@ -2050,6 +2432,23 @@
             modal.classList.add('flex');
         }
 
+        function saveModalSubjectRoomScope() {
+            if (!state.modalSubjectId) return;
+            const sub = state.subjects.find(s => s.id === state.modalSubjectId);
+            if (!sub) return;
+            const checked = document.getElementById('modal-sub-room-specific')?.checked;
+            const roomsVal = document.getElementById('modal-sub-target-rooms')?.value.trim() || '';
+            if (checked && !roomsVal) {
+                showToast('กรุณาระบุชื่อห้องสอบเฉพาะ', 'warning');
+                return;
+            }
+            sub.isRoomSpecific = Boolean(checked && roomsVal);
+            sub.targetRooms = sub.isRoomSpecific ? roomsVal : '';
+            saveState('saveSubjects', { subjects: state.subjects });
+            showToast('บันทึกข้อมูลห้องสอบเฉพาะเรียบร้อยแล้ว', 'success');
+            render();
+        }
+
         function closeSlotModal() {
             const modal = document.getElementById('slot-modal');
             modal.classList.add('hidden');
@@ -2064,7 +2463,7 @@
             sub.slotId = slotId;
             saveState('saveSubjects', { subjects: state.subjects });
             const days = getDaysForGrade(sub.gradeId);
-            showToast(`ย้ายวิชา ${sub.code} ไปที่ ${days[dayIndex]} (${getSlotLabel(slotId, sub.duration)})`, 'success');
+            showToast(`ย้ายวิชา ${sub.code} ไปที่ ${days[dayIndex]} (${getSlotLabel(slotId, sub.duration, sub.gradeId)})`, 'success');
             render();
         }
 
@@ -2201,16 +2600,33 @@
                         class="px-3.5 py-2 rounded-xl text-xs font-bold transition ${state.exportMode === 'subject' ? 'theme-btn shadow-sm' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}">
                         <i class="fas fa-book-open mr-1.5"></i>3. ส่งออกแยกตามรายวิชา (รหัสวิชา)
                     </button>
+                    <button type="button" onclick="state.exportMode='handover'; render();"
+                        class="px-3.5 py-2 rounded-xl text-xs font-bold transition ${state.exportMode === 'handover' ? 'theme-btn shadow-sm' : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'}">
+                        <i class="fas fa-file-signature mr-1.5"></i>4. ใบเซ็นรับ-ส่งข้อสอบแต่ละห้อง
+                    </button>
                 </div>
-            ` : '';
+            ` : `
+                <div class="flex flex-wrap gap-2 mt-4 pt-4 border-t border-gray-100">
+                    <button type="button" onclick="state.exportMode='grade'; render();"
+                        class="px-3.5 py-2 rounded-xl text-xs font-bold transition ${state.exportMode === 'grade' ? 'theme-btn shadow-sm' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}">
+                        <i class="fas fa-layer-group mr-1.5"></i>1. ตารางสอบนักเรียน (แยกตามระดับชั้น)
+                    </button>
+                    <button type="button" onclick="state.exportMode='handover'; render();"
+                        class="px-3.5 py-2 rounded-xl text-xs font-bold transition ${state.exportMode === 'handover' ? 'theme-btn shadow-sm' : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'}">
+                        <i class="fas fa-file-signature mr-1.5"></i>2. ใบเซ็นรับ-ส่งข้อสอบแต่ละห้อง
+                    </button>
+                </div>
+            `;
 
             let contentHtml = '';
             if (state.exportMode === 'grade') {
                 contentHtml = renderGradeExportView();
             } else if (state.exportMode === 'teacher') {
                 contentHtml = renderTeacherExportView();
-            } else {
+            } else if (state.exportMode === 'subject') {
                 contentHtml = renderSubjectExportView();
+            } else {
+                contentHtml = renderRoomHandoverExportView();
             }
 
             return `
@@ -2251,15 +2667,17 @@
         }
 
         function renderGradeExportView() {
-            const filterOptions = `<option value="all">แสดงทุกระดับชั้น (${GRADE_GROUPS.length} ตาราง)</option>` +
-                GRADE_GROUPS.map(g => `<option value="${g.id}" ${state.exportFilterGrade === g.id ? 'selected' : ''}>${escapeHtml(g.name)}</option>`).join('');
+            const gradeGroups = getGradeGroups();
+            const filterOptions = `<option value="all">แสดงทุกระดับชั้น (${gradeGroups.length} ตาราง)</option>` +
+                gradeGroups.map(g => `<option value="${g.id}" ${state.exportFilterGrade === g.id ? 'selected' : ''}>${escapeHtml(g.name)}</option>`).join('');
 
             const targetGrades = state.exportFilterGrade === 'all'
-                ? GRADE_GROUPS
-                : GRADE_GROUPS.filter(g => g.id === state.exportFilterGrade);
+                ? gradeGroups
+                : gradeGroups.filter(g => g.id === state.exportFilterGrade);
 
             const sectionsHtml = targetGrades.map(grade => {
                 const days = getDaysForGrade(grade.id);
+                const timeSlots = getSlotsForGrade(grade.id);
                 const gradeSubjects = state.subjects.filter(s => s.gradeId === grade.id && s.dayIndex !== null && s.slotId !== null);
                 const sectionId = `grade-sec-${grade.id}`;
 
@@ -2271,7 +2689,7 @@
                     let hasMorning = false;
                     let hasAfternoon = false;
 
-                    TIME_SLOTS.forEach(slot => {
+                    timeSlots.forEach(slot => {
                         if (slot.period === 'lunch') {
                             rows.push({ isLunch: true, label: slot.label });
                             return;
@@ -2283,9 +2701,9 @@
                             rows.push({
                                 isLunch: false,
                                 showTime: idx === 0,
-                                timeText: getSlotLabel(slot.id, sub.duration),
+                                timeText: getSlotLabel(slot.id, sub.duration, grade.id),
                                 code: sub.code,
-                                name: sub.name,
+                                name: getSubjectDisplayName(sub),
                                 duration: `${sub.duration} นาที`,
                                 teachers: formatTeachersDisplay(sub.teachers)
                             });
@@ -2374,14 +2792,15 @@
             `;
         }
 
-        function getTeacherScheduleMap() {
+        function getTeacherScheduleMap(subjectsSource = state.subjects) {
             const map = new Map();
-            state.subjects.forEach(sub => {
+            (subjectsSource || []).forEach(sub => {
                 const grade = getGradeObj(sub.gradeId);
                 const days = getDaysForGrade(sub.gradeId);
+                const slots = getSlotsForGrade(sub.gradeId);
                 const dayText = sub.dayIndex !== null ? (days[sub.dayIndex] || '-') : 'ยังไม่จัดวัน';
-                const timeText = sub.slotId ? getSlotLabel(sub.slotId, sub.duration) : 'ยังไม่จัดเวลา';
-                const slotOrder = TIME_SLOTS.findIndex(s => s.id === sub.slotId);
+                const timeText = sub.slotId ? getSlotLabel(sub.slotId, sub.duration, sub.gradeId) : 'ยังไม่จัดเวลา';
+                const slotOrder = slots.findIndex(s => s.id === sub.slotId);
 
                 (sub.teachers || []).forEach(t => {
                     const tName = t.name.trim();
@@ -2395,7 +2814,7 @@
                         timeText,
                         slotOrder: slotOrder === -1 ? 99 : slotOrder,
                         code: sub.code,
-                        name: sub.name,
+                        name: getSubjectDisplayName(sub),
                         duration: sub.duration,
                         rooms: t.rooms || '-',
                         coTeachersCount: sub.teachers.length
@@ -2403,7 +2822,6 @@
                 });
             });
 
-            // Sort each teacher's rows by day & time
             map.forEach(items => {
                 items.sort((a, b) => (a.dayIndex - b.dayIndex) || (a.slotOrder - b.slotOrder));
             });
@@ -2519,12 +2937,12 @@
                 const grade = getGradeObj(sub.gradeId);
                 const days = getDaysForGrade(sub.gradeId);
                 const dayText = sub.dayIndex !== null ? (days[sub.dayIndex] || '-') : 'ยังไม่จัดวัน';
-                const timeText = sub.slotId ? getSlotLabel(sub.slotId, sub.duration) : 'ยังไม่จัดเวลา';
+                const timeText = sub.slotId ? getSlotLabel(sub.slotId, sub.duration, sub.gradeId) : 'ยังไม่จัดเวลา';
 
                 return `
                     <tr>
                         <td class="border border-gray-800 p-2 text-center doc-bold whitespace-nowrap">${escapeHtml(sub.code)}</td>
-                        <td class="border border-gray-800 p-2">${escapeHtml(sub.name)}</td>
+                        <td class="border border-gray-800 p-2">${escapeHtml(getSubjectDisplayName(sub))}</td>
                         <td class="border border-gray-800 p-2 text-center whitespace-nowrap">${escapeHtml(grade.short)}</td>
                         <td class="border border-gray-800 p-2 whitespace-nowrap">${escapeHtml(dayText)}</td>
                         <td class="border border-gray-800 p-2 text-center whitespace-nowrap">${escapeHtml(timeText)}</td>
@@ -2572,6 +2990,199 @@
                             </table>
                         </div>
                     </div>
+                </div>
+            `;
+        }
+
+        function updateGradeRoomsListFromInput() {
+            const grade = getGradeObj(state.exportHandoverGrade);
+            const input = document.getElementById('handover-rooms-input');
+            if (!grade || !input) return;
+            const parsedRooms = input.value.split(/[,;]+/).map(r => r.trim()).filter(Boolean);
+            if (parsedRooms.length === 0) {
+                showToast('กรุณาระบุชื่อห้องสอบอย่างน้อย 1 ห้อง', 'warning');
+                return;
+            }
+            grade.roomsList = parsedRooms;
+            state.exportHandoverRoom = 'all';
+            saveState('saveSettings', { settings: state.settings, isSchedulePublished: state.isSchedulePublished });
+            showToast(`อัปเดตรายชื่อห้องสอบของ ${grade.short} (${parsedRooms.length} ห้อง) เรียบร้อยแล้ว`, 'success');
+            render();
+        }
+
+        function buildRoomHandoverTableHtml(grade, roomName, subjectsSource = state.subjects) {
+            const days = getDaysForGrade(grade.id);
+            const timeSlots = getSlotsForGrade(grade.id);
+            const gradeSubjects = (subjectsSource || []).filter(s => s.gradeId === grade.id && s.dayIndex !== null && s.slotId !== null);
+
+            const roomExamItems = [];
+            days.forEach((dayLabel, dIdx) => {
+                const daySubs = gradeSubjects.filter(s => s.dayIndex === dIdx);
+                timeSlots.forEach(slot => {
+                    if (slot.period === 'lunch') return;
+                    const slotSubs = daySubs.filter(s => s.slotId === slot.id);
+                    slotSubs.forEach(sub => {
+                        const roomTeacher = getTeacherForRoomInSubject(sub, roomName);
+                        if (roomTeacher !== null) {
+                            roomExamItems.push({
+                                dayLabel,
+                                timeText: getSlotLabel(slot.id, sub.duration, grade.id),
+                                code: sub.code,
+                                name: getSubjectDisplayName(sub),
+                                teacher: roomTeacher
+                            });
+                        }
+                    });
+                });
+            });
+
+            const logoHtml = state.settings.logoDataUrl
+                ? `<img src="${state.settings.logoDataUrl}" alt="ตราโรงเรียน" class="w-14 h-14 object-contain mx-auto mb-1.5">`
+                : '';
+
+            const rowsHtml = roomExamItems.length > 0
+                ? roomExamItems.map((item, idx) => `
+                    <tr>
+                        <td class="border border-gray-800 p-1.5 text-center">${idx + 1}</td>
+                        <td class="border border-gray-800 p-1.5 whitespace-nowrap">${escapeHtml(item.dayLabel)}</td>
+                        <td class="border border-gray-800 p-1.5 text-center whitespace-nowrap">${escapeHtml(item.timeText)}</td>
+                        <td class="border border-gray-800 p-1.5 text-center doc-bold whitespace-nowrap">${escapeHtml(item.code)}</td>
+                        <td class="border border-gray-800 p-1.5">${escapeHtml(item.name)}</td>
+                        <td class="border border-gray-800 p-1.5">${escapeHtml(item.teacher)}</td>
+                        <td class="border border-gray-800 p-1.5 text-center w-[58px]"></td>
+                        <td class="border border-gray-800 p-1.5 w-[110px]"></td>
+                        <td class="border border-gray-800 p-1.5 text-center w-[62px]"></td>
+                        <td class="border border-gray-800 p-1.5 w-[110px]"></td>
+                        <td class="border border-gray-800 p-1.5 text-center w-[62px]"></td>
+                        <td class="border border-gray-800 p-1.5 w-[85px]"></td>
+                    </tr>
+                `).join('')
+                : `<tr><td colspan="12" class="border border-gray-800 p-6 text-center text-gray-500">ยังไม่มีรายวิชาสอบที่จัดลงตารางสำหรับห้อง ${escapeHtml(roomName)}</td></tr>`;
+
+            return `
+                <div class="text-center mb-3">
+                    ${logoHtml}
+                    <div class="text-xs font-semibold">${escapeHtml(state.settings.schoolName)}</div>
+                    <div class="text-base sm:text-lg doc-bold mt-0.5">แบบบันทึกการรับ - ส่งข้อสอบ (ประจำห้องสอบ)</div>
+                    <div class="text-xs sm:text-sm doc-bold">การสอบ${escapeHtml(state.settings.examType)} ${escapeHtml(getTermSubtitle())}</div>
+                    <div class="text-sm sm:text-base doc-bold theme-text mt-1">
+                        ${escapeHtml(grade.name)} &nbsp;&nbsp;|&nbsp;&nbsp; ห้องสอบ ${escapeHtml(roomName)}
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full border-collapse border border-gray-800 text-xs">
+                        <thead>
+                            <tr class="bg-gray-100 text-center">
+                                <th rowspan="2" class="border border-gray-800 p-1.5 w-[32px]">ที่</th>
+                                <th rowspan="2" class="border border-gray-800 p-1.5">วัน/เดือน/ปี</th>
+                                <th rowspan="2" class="border border-gray-800 p-1.5">เวลาสอบ</th>
+                                <th rowspan="2" class="border border-gray-800 p-1.5">รหัสวิชา</th>
+                                <th rowspan="2" class="border border-gray-800 p-1.5">รายวิชา</th>
+                                <th rowspan="2" class="border border-gray-800 p-1.5">ครูผู้สอนประจำห้อง</th>
+                                <th rowspan="2" class="border border-gray-800 p-1.5 w-[58px]">จำนวน<br>(ฉบับ)</th>
+                                <th colspan="2" class="border border-gray-800 p-1">การรับข้อสอบ (ก่อนสอบ)</th>
+                                <th colspan="3" class="border border-gray-800 p-1">การส่งข้อสอบคืน (หลังสอบ)</th>
+                            </tr>
+                            <tr class="bg-gray-100 text-center">
+                                <th class="border border-gray-800 p-1">ลงชื่อผู้รับข้อสอบ</th>
+                                <th class="border border-gray-800 p-1">เวลารับ</th>
+                                <th class="border border-gray-800 p-1">ลงชื่อผู้ส่งคืน</th>
+                                <th class="border border-gray-800 p-1">เวลาส่ง</th>
+                                <th class="border border-gray-800 p-1">ผู้ตรวจรับคืน</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rowsHtml}</tbody>
+                    </table>
+                </div>
+                <div class="mt-5 pt-2 flex flex-col sm:flex-row justify-between items-end gap-4 text-xs">
+                    <div>หมายเหตุ: กรรมการคุมสอบกรุณาตรวจนับจำนวนกระดาษคำตอบและซองข้อสอบให้ครบถ้วนก่อนลงชื่อรับ-ส่งทุกครั้ง</div>
+                    <div class="text-center whitespace-nowrap">
+                        <div>ลงชื่อ .................................................................... เจ้าหน้าที่งานวัดผล / วิชาการ</div>
+                        <div class="mt-1">( .................................................................... )</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderRoomHandoverExportView() {
+            const gradeGroups = getGradeGroups();
+            if (!gradeGroups.some(g => g.id === state.exportHandoverGrade)) {
+                state.exportHandoverGrade = gradeGroups[0].id;
+            }
+            const grade = getGradeObj(state.exportHandoverGrade);
+            const allRooms = getRoomsForGrade(grade.id);
+
+            const gradeOptions = gradeGroups.map(g =>
+                `<option value="${g.id}" ${g.id === grade.id ? 'selected' : ''}>${escapeHtml(g.name)}</option>`
+            ).join('');
+
+            const roomOptions = `<option value="all">แสดงทุกห้องสอบในกลุ่มนี้ (${allRooms.length} ห้อง)</option>` +
+                allRooms.map(r => `<option value="${escapeHtml(r)}" ${state.exportHandoverRoom === r ? 'selected' : ''}>ห้องสอบ ${escapeHtml(r)}</option>`).join('');
+
+            const targetRooms = state.exportHandoverRoom === 'all'
+                ? allRooms
+                : allRooms.filter(r => r === state.exportHandoverRoom);
+
+            const cardsHtml = targetRooms.map((roomName, idx) => {
+                const sectionId = `handover-sec-${grade.id}-${idx}`;
+                const safeRoomFile = sanitizeFilename(roomName);
+                return `
+                    <div id="${sectionId}" class="printable-section page-break bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6 print-card export-doc-area">
+                        <div class="flex flex-wrap items-center justify-end gap-2 mb-3 no-print no-capture">
+                            <button type="button" onclick="exportSectionAsWordDoc('${sectionId}', 'ใบรับส่งข้อสอบ_${safeRoomFile}')"
+                                class="px-3.5 py-2 rounded-xl text-xs font-bold bg-blue-700 hover:bg-blue-800 text-white shadow-sm transition flex items-center gap-1.5">
+                                <i class="fas fa-file-word"></i> Word (.doc) ห้องนี้
+                            </button>
+                            <button type="button" onclick="downloadSectionAsPNG('${sectionId}', 'ใบรับส่งข้อสอบ_${safeRoomFile}')"
+                                class="px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition flex items-center gap-1.5">
+                                <i class="fas fa-image"></i> PNG ห้องนี้
+                            </button>
+                            <button type="button" onclick="printSingleSection('${sectionId}')"
+                                class="px-3.5 py-2 rounded-xl text-xs font-bold bg-gray-800 hover:bg-gray-900 text-white shadow-sm transition flex items-center gap-1.5">
+                                <i class="fas fa-print"></i> PDF / พิมพ์ห้องนี้
+                            </button>
+                        </div>
+                        ${buildRoomHandoverTableHtml(grade, roomName)}
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                <div class="space-y-5">
+                    <div class="bg-white rounded-2xl shadow-sm border border-amber-200 p-4 space-y-3 no-print">
+                        <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                            <div>
+                                <div class="text-xs sm:text-sm font-bold text-gray-800 flex items-center gap-1.5">
+                                    <i class="fas fa-file-signature text-amber-600"></i> เลือกระดับชั้นและห้องสอบสำหรับใบเซ็นรับ-ส่งข้อสอบ
+                                </div>
+                                <div class="text-xs text-gray-500 mt-0.5">
+                                    ระบบจะแสดงเฉพาะวิชาและครูผู้สอนของห้องนั้นๆ (รวมถึงวิชาที่สอบเพิ่มเฉพาะห้องเดียว) แยก 1 ห้องต่อ 1 หน้า A4
+                                </div>
+                            </div>
+                            <div class="flex flex-col sm:flex-row gap-2">
+                                <select onchange="state.exportHandoverGrade=this.value; state.exportHandoverRoom='all'; render();"
+                                    class="border border-gray-300 rounded-xl px-3 py-2 text-xs sm:text-sm bg-white outline-none">
+                                    ${gradeOptions}
+                                </select>
+                                <select onchange="state.exportHandoverRoom=this.value; render();"
+                                    class="border border-gray-300 rounded-xl px-3 py-2 text-xs sm:text-sm bg-white outline-none">
+                                    ${roomOptions}
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="pt-2 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center gap-2">
+                            <label class="text-xs font-bold text-gray-600 whitespace-nowrap">รายชื่อห้องสอบใน ${escapeHtml(grade.short)}:</label>
+                            <input type="text" id="handover-rooms-input" value="${escapeHtml(allRooms.join(', '))}"
+                                placeholder="เช่น ม.1/1, ม.1/2, ม.1/3"
+                                class="flex-grow border border-gray-300 rounded-xl px-3 py-1.5 text-xs outline-none">
+                            <button type="button" onclick="updateGradeRoomsListFromInput()"
+                                class="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white transition flex-shrink-0">
+                                <i class="fas fa-save mr-1"></i>อัปเดตรายชื่อห้อง
+                            </button>
+                        </div>
+                    </div>
+                    ${cardsHtml}
                 </div>
             `;
         }
@@ -2745,6 +3356,34 @@
         }
 
         function exportCurrentModeCSV() {
+            if (state.exportMode === 'handover') {
+                const grade = getGradeObj(state.exportHandoverGrade);
+                const allRooms = getRoomsForGrade(grade.id);
+                const targetRooms = state.exportHandoverRoom === 'all' ? allRooms : allRooms.filter(r => r === state.exportHandoverRoom);
+                const days = getDaysForGrade(grade.id);
+                const timeSlots = getSlotsForGrade(grade.id);
+                const gradeSubjects = state.subjects.filter(s => s.gradeId === grade.id && s.dayIndex !== null && s.slotId !== null);
+
+                const headers = ['ห้องสอบ', 'วันสอบ', 'เวลาสอบ', 'รหัสวิชา', 'รายวิชา', 'ครูผู้สอนประจำห้อง', 'จำนวนข้อสอบ(ฉบับ)', 'ลงชื่อผู้รับข้อสอบ', 'เวลารับ', 'ลงชื่อผู้ส่งคืน', 'เวลาส่ง', 'ผู้ตรวจรับคืน'];
+                const rows = [];
+                targetRooms.forEach(roomName => {
+                    days.forEach((dayLabel, dIdx) => {
+                        const daySubs = gradeSubjects.filter(s => s.dayIndex === dIdx);
+                        timeSlots.forEach(slot => {
+                            if (slot.period === 'lunch') return;
+                            daySubs.filter(s => s.slotId === slot.id).forEach(sub => {
+                                const tRoom = getTeacherForRoomInSubject(sub, roomName);
+                                if (tRoom !== null) {
+                                    rows.push([roomName, dayLabel, getSlotLabel(slot.id, sub.duration, grade.id), sub.code, getSubjectDisplayName(sub), tRoom, '', '', '', '', '', '']);
+                                }
+                            });
+                        });
+                    });
+                });
+                downloadCSV(`ใบเซ็นรับส่งข้อสอบ_${grade.short}.csv`, headers, rows);
+                return;
+            }
+
             if (state.exportMode === 'teacher') {
                 const teacherMap = getTeacherScheduleMap();
                 const headers = ['ครูผู้สอน', 'กลุ่มสาระการเรียนรู้', 'วันสอบ', 'เวลาสอบ', 'ระดับชั้น', 'รหัสวิชา', 'รายวิชา', 'ระยะเวลา(นาที)', 'ห้องที่สอน'];
@@ -2768,8 +3407,8 @@
                 const grade = getGradeObj(sub.gradeId);
                 const days = getDaysForGrade(sub.gradeId);
                 const dayText = sub.dayIndex !== null ? (days[sub.dayIndex] || '-') : 'ยังไม่จัดวัน';
-                const timeText = sub.slotId ? getSlotLabel(sub.slotId, sub.duration) : 'ยังไม่จัดเวลา';
-                rows.push([grade.name, dayText, timeText, sub.code, sub.name, sub.duration, formatTeachersDisplay(sub.teachers)]);
+                const timeText = sub.slotId ? getSlotLabel(sub.slotId, sub.duration, sub.gradeId) : 'ยังไม่จัดเวลา';
+                rows.push([grade.name, dayText, timeText, sub.code, getSubjectDisplayName(sub), sub.duration, formatTeachersDisplay(sub.teachers)]);
             });
             downloadCSV(`ตารางสอบ${state.settings.examType}.csv`, headers, rows);
         }
@@ -2836,12 +3475,159 @@
             const deptDataList = DEPARTMENTS.map(d => `<option value="${escapeHtml(d)}">`).join('');
 
             const logoPreview = state.settings.logoDataUrl
-                ? `<img src="${state.settings.logoDataUrl}" alt="ตราโรงเรียน" class="w-16 h-16 object-contain rounded-xl border border-gray-200 bg-white p-1">`
-                : `<div class="w-16 h-16 rounded-xl bg-gray-100 border border-dashed border-gray-300 flex items-center justify-center text-gray-400"><i class="fas fa-image text-xl"></i></div>`;
+                ? `<img id="settings-logo-preview" src="${state.settings.logoDataUrl}" alt="ตราโรงเรียน" class="w-16 h-16 object-contain rounded-xl border border-gray-200 bg-white p-1" onerror="this.alt='โหลดรูปไม่สำเร็จ'">`
+                : `<div id="settings-logo-preview" class="w-16 h-16 rounded-xl bg-gray-100 border border-dashed border-gray-300 flex items-center justify-center text-gray-400"><i class="fas fa-image text-xl"></i></div>`;
+
+            // Dynamic Exam Days Inputs (ม.ต้น / ม.ปลาย)
+            const lowerDayInputs = state.settings.lowerDays.map((d, idx) => `
+                <div class="flex items-center gap-2">
+                    <span class="text-xs font-bold text-sky-700 bg-sky-50 px-2.5 py-2 rounded-lg whitespace-nowrap">วันที่ ${idx + 1}</span>
+                    <input type="text" data-lower-day="${idx}" value="${escapeHtml(d)}" required
+                        class="flex-grow border border-gray-300 rounded-xl p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                    ${state.settings.lowerDays.length > 1 ? `
+                        <button type="button" onclick="removeDefaultExamDay('lower', ${idx})" class="w-9 h-9 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 flex items-center justify-center flex-shrink-0" title="ลบวันนี้">
+                            <i class="fas fa-trash-alt text-xs"></i>
+                        </button>
+                    ` : ''}
+                </div>
+            `).join('');
+
+            const upperDayInputs = state.settings.upperDays.map((d, idx) => `
+                <div class="flex items-center gap-2">
+                    <span class="text-xs font-bold text-violet-700 bg-violet-50 px-2.5 py-2 rounded-lg whitespace-nowrap">วันที่ ${idx + 1}</span>
+                    <input type="text" data-upper-day="${idx}" value="${escapeHtml(d)}" required
+                        class="flex-grow border border-gray-300 rounded-xl p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                    ${state.settings.upperDays.length > 1 ? `
+                        <button type="button" onclick="removeDefaultExamDay('upper', ${idx})" class="w-9 h-9 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 flex items-center justify-center flex-shrink-0" title="ลบวันนี้">
+                            <i class="fas fa-trash-alt text-xs"></i>
+                        </button>
+                    ` : ''}
+                </div>
+            `).join('');
+
+            // Dynamic Grade Groups Rows
+            const gradeGroups = getGradeGroups();
+            const gradeRowsHtml = gradeGroups.map(g => {
+                const subCount = state.subjects.filter(s => s.gradeId === g.id).length;
+                const gDays = getDaysForGrade(g.id);
+                const gSlots = getSlotsForGrade(g.id).filter(s => s.period !== 'lunch');
+                const levelBadge = g.level === 'lower'
+                    ? `<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-sky-100 text-sky-700">ม.ต้น</span>`
+                    : (g.level === 'upper'
+                        ? `<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-violet-100 text-violet-700">ม.ปลาย</span>`
+                        : `<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800">กำหนดเอง</span>`);
+                return `
+                    <tr class="border-b border-gray-100 hover:bg-gray-50/70">
+                        <td class="p-3 whitespace-nowrap">${levelBadge}</td>
+                        <td class="p-3 font-bold text-sm text-gray-800 whitespace-nowrap">${escapeHtml(g.short)}</td>
+                        <td class="p-3 text-sm text-gray-700">${escapeHtml(g.name)} <span class="text-xs text-gray-400">(${subCount} วิชา)</span></td>
+                        <td class="p-3 text-xs text-gray-600">
+                            <div><i class="fas fa-calendar-day mr-1 ${g.useCustomDays ? 'text-amber-600' : 'text-gray-400'}"></i>${gDays.length} วัน ${g.useCustomDays ? '<span class="text-amber-700 font-bold">(เฉพาะชั้น)</span>' : '(ตามกลุ่ม)'}</div>
+                            <div class="mt-0.5"><i class="far fa-clock mr-1 ${g.useCustomSlots ? 'text-amber-600' : 'text-gray-400'}"></i>${gSlots.length} ช่วงเวลา ${g.useCustomSlots ? '<span class="text-amber-700 font-bold">(เฉพาะชั้น)</span>' : '(เวลามาตรฐาน)'}</div>
+                        </td>
+                        <td class="p-3 text-right whitespace-nowrap">
+                            <div class="inline-flex items-center gap-1.5">
+                                <button type="button" onclick="openGradeConfigModal('${g.id}')" class="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition">
+                                    <i class="fas fa-sliders-h mr-1"></i>ตั้งค่าวัน/เวลา
+                                </button>
+                                ${gradeGroups.length > 1 ? `
+                                    <button type="button" onclick="confirmDeleteGradeGroup('${g.id}')" class="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-red-50 hover:bg-red-100 text-red-600 transition" title="ลบกลุ่มชั้นนี้">
+                                        <i class="fas fa-trash-alt"></i>
+                                    </button>
+                                ` : ''}
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            // Term Archive Folders Cards
+            const archiveCardsHtml = (state.archives || []).length > 0
+                ? state.archives.map(arch => {
+                    const dateStr = arch.archivedAt
+                        ? new Date(arch.archivedAt).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })
+                        : '-';
+                    return `
+                        <div class="p-4 rounded-2xl border border-amber-200 bg-amber-50/40 hover:bg-amber-50/80 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div class="flex items-start gap-3 min-w-0">
+                                <div class="w-11 h-11 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center flex-shrink-0">
+                                    <i class="fas fa-folder-open text-xl"></i>
+                                </div>
+                                <div class="min-w-0">
+                                    <div class="font-bold text-sm text-gray-900 truncate">${escapeHtml(arch.folderName)}</div>
+                                    <div class="text-xs text-gray-600 mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                        <span class="font-semibold text-amber-800">สอบ${escapeHtml(arch.examType || '')}</span>
+                                        <span>• ${escapeHtml(arch.termSubtitle || '')}</span>
+                                        <span>• ${arch.subjectCount || 0} รายวิชา</span>
+                                    </div>
+                                    <div class="text-[11px] text-gray-500 mt-0.5">
+                                        <i class="far fa-clock mr-1"></i>บันทึกเมื่อ ${escapeHtml(dateStr)}
+                                        ${arch.driveFolderUrl ? ` • <a href="${escapeHtml(arch.driveFolderUrl)}" target="_blank" rel="noopener" class="text-blue-600 hover:underline font-bold"><i class="fab fa-google-drive mr-0.5"></i>เปิดโฟลเดอร์ Google Drive</a>` : ''}
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="flex flex-wrap items-center gap-1.5 flex-shrink-0">
+                                <button type="button" onclick="downloadArchivedFolderZip('${arch.id}')" class="px-3 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition">
+                                    <i class="fas fa-file-archive mr-1"></i>โหลดโฟลเดอร์ (.ZIP)
+                                </button>
+                                <button type="button" onclick="confirmRestoreArchive('${arch.id}')" class="px-3 py-2 rounded-xl text-xs font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition">
+                                    <i class="fas fa-history mr-1"></i>กู้คืนเทอมนี้
+                                </button>
+                                <button type="button" onclick="confirmDeleteArchive('${arch.id}')" class="px-2.5 py-2 rounded-xl text-xs font-bold bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 transition" title="ลบโฟลเดอร์นี้">
+                                    <i class="fas fa-trash-alt"></i>
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }).join('')
+                : `<div class="p-6 text-center text-xs sm:text-sm text-gray-500 bg-gray-50 rounded-xl border border-dashed border-gray-300">
+                    <i class="fas fa-folder-open text-2xl text-gray-300 mb-2 block"></i>
+                    ยังไม่มีโฟลเดอร์ข้อมูลเทอมที่บันทึกไว้ — กดปุ่ม <strong>"บันทึกโฟลเดอร์เทอมนี้"</strong> ด้านบนเพื่อเก็บข้อมูลการสอบทุกรอบไว้เป็นโฟลเดอร์
+                   </div>`;
 
             return `
                 <div class="space-y-6">
-                    <!-- Section 0: Google Sheets Apps Script Real-Time Cloud Sync -->
+                    <!-- Section 0: Term Archive, New Academic Year / Term & Safe Clear Data -->
+                    <div class="bg-white rounded-2xl shadow-sm border border-amber-200 p-4 sm:p-6 space-y-4">
+                        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-gray-100">
+                            <div>
+                                <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+                                    <i class="fas fa-folder-open text-amber-500"></i> จัดเก็บโฟลเดอร์แยกตามเทอม / เปลี่ยนปีการศึกษา / ล้างข้อมูลอย่างปลอดภัย
+                                </h2>
+                                <p class="text-xs text-gray-500 mt-0.5">
+                                    ก่อนเปลี่ยนปีการศึกษา เทอมใหม่ หรือล้างข้อมูล สามารถกดบันทึกและส่งออกข้อมูลทั้งหมดเก็บไว้เป็นโฟลเดอร์ของเทอมนั้นๆ ได้ทุกการสอบ (มีหน้าต่างยืนยันทุกครั้ง)
+                                </p>
+                            </div>
+                            <div class="flex flex-wrap gap-2">
+                                <button type="button" onclick="openTermArchiveModal('archive_only')"
+                                    class="px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white shadow-sm transition flex items-center gap-1.5">
+                                    <i class="fas fa-folder-plus"></i> บันทึก & ส่งออกโฟลเดอร์เทอมนี้ (.ZIP)
+                                </button>
+                                <button type="button" onclick="openTermArchiveModal('new_term')"
+                                    class="theme-btn px-3.5 py-2 rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-1.5">
+                                    <i class="fas fa-calendar-plus"></i> เปลี่ยนปีการศึกษา / เริ่มเทอมใหม่
+                                </button>
+                                <button type="button" onclick="openTermArchiveModal('clear_data')"
+                                    class="px-3.5 py-2 rounded-xl text-xs font-bold bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 transition flex items-center gap-1.5">
+                                    <i class="fas fa-broom"></i> ล้างข้อมูล (พร้อมบันทึกก่อนลบ)
+                                </button>
+                                <label class="cursor-pointer px-3.5 py-2 rounded-xl text-xs font-bold bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-200 transition flex items-center gap-1.5">
+                                    <i class="fas fa-file-upload"></i> นำเข้าไฟล์สำรอง (.JSON)
+                                    <input type="file" accept=".json" class="hidden" onchange="importBackupJsonFile(event)">
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="space-y-2.5">
+                            <div class="text-xs font-bold text-gray-700 flex items-center justify-between">
+                                <span>คลังโฟลเดอร์ข้อมูลแต่ละเทอม / การสอบ (${(state.archives || []).length} โฟลเดอร์)</span>
+                                <span class="text-[11px] font-normal text-gray-500">เทอมปัจจุบัน: ${escapeHtml(getExamMainTitle())} ${escapeHtml(getTermSubtitle())}</span>
+                            </div>
+                            ${archiveCardsHtml}
+                        </div>
+                    </div>
+
+                    <!-- Section 1: Google Sheets Apps Script Real-Time Cloud Sync -->
                     <div class="bg-white rounded-2xl shadow-sm border border-emerald-200 p-4 sm:p-6 space-y-4">
                         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-gray-100">
                             <div>
@@ -2895,14 +3681,14 @@
                         `}
                     </div>
 
-                    <!-- Section 1: School Branding, Exam Type & Theme -->
+                    <!-- Section 2: School Branding, Exam Type, Dynamic Exam Days & Theme -->
                     <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6 space-y-5">
                         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-gray-100">
                             <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
-                                <i class="fas fa-palette theme-text"></i> ตั้งค่าโรงเรียน หัวข้อสอบ ตราโรงเรียน และธีมสี
+                                <i class="fas fa-palette theme-text"></i> ตั้งค่าโรงเรียน หัวข้อสอบ วันสอบ ตราโรงเรียน และธีมสี
                             </h2>
                             <button type="button" onclick="confirmResetSystemData()" class="text-xs font-semibold text-red-500 hover:text-red-700 self-start sm:self-auto">
-                                <i class="fas fa-rotate-left mr-1"></i>รีเซ็ตข้อมูลเริ่มต้น
+                                <i class="fas fa-rotate-left mr-1"></i>รีเซ็ตข้อมูลเริ่มต้นทั้งหมด
                             </button>
                         </div>
 
@@ -2924,46 +3710,46 @@
                             </div>
                         </div>
 
-                        <!-- General Info & Exam Days Form -->
-                        <form onsubmit="saveGeneralSettings(event)" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อโรงเรียน</label>
-                                <input type="text" id="set-school" value="${escapeHtml(state.settings.schoolName)}" required
-                                    class="w-full border border-gray-300 rounded-xl p-2.5 text-sm outline-none">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-bold text-gray-700 mb-1">ภาคเรียนและปีการศึกษา (บรรทัดที่ 2)</label>
-                                <input type="text" id="set-term" value="${escapeHtml(state.settings.termSubtitle)}" required
-                                    class="w-full border border-gray-300 rounded-xl p-2.5 text-sm outline-none">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-bold text-gray-700 mb-1">วันสอบ ม.ต้น (วันที่ 1)</label>
-                                <input type="text" id="set-lower-0" value="${escapeHtml(state.settings.lowerDays[0] || '')}" required
-                                    class="w-full border border-gray-300 rounded-xl p-2.5 text-sm outline-none">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-bold text-gray-700 mb-1">วันสอบ ม.ต้น (วันที่ 2)</label>
-                                <input type="text" id="set-lower-1" value="${escapeHtml(state.settings.lowerDays[1] || '')}" required
-                                    class="w-full border border-gray-300 rounded-xl p-2.5 text-sm outline-none">
-                            </div>
-                            <div class="md:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <!-- General Info & Dynamic Exam Days Form -->
+                        <form onsubmit="saveGeneralSettings(event)" class="space-y-4">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                    <label class="block text-xs font-bold text-gray-700 mb-1">วันสอบ ม.ปลาย (วันที่ 1)</label>
-                                    <input type="text" id="set-upper-0" value="${escapeHtml(state.settings.upperDays[0] || '')}" required
+                                    <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อโรงเรียน</label>
+                                    <input type="text" id="set-school" value="${escapeHtml(state.settings.schoolName)}" required
                                         class="w-full border border-gray-300 rounded-xl p-2.5 text-sm outline-none">
                                 </div>
                                 <div>
-                                    <label class="block text-xs font-bold text-gray-700 mb-1">วันสอบ ม.ปลาย (วันที่ 2)</label>
-                                    <input type="text" id="set-upper-1" value="${escapeHtml(state.settings.upperDays[1] || '')}" required
-                                        class="w-full border border-gray-300 rounded-xl p-2.5 text-sm outline-none">
-                                </div>
-                                <div>
-                                    <label class="block text-xs font-bold text-gray-700 mb-1">วันสอบ ม.ปลาย (วันที่ 3)</label>
-                                    <input type="text" id="set-upper-2" value="${escapeHtml(state.settings.upperDays[2] || '')}" required
+                                    <label class="block text-xs font-bold text-gray-700 mb-1">ภาคเรียนและปีการศึกษา (บรรทัดที่ 2)</label>
+                                    <input type="text" id="set-term" value="${escapeHtml(state.settings.termSubtitle)}" required
                                         class="w-full border border-gray-300 rounded-xl p-2.5 text-sm outline-none">
                                 </div>
                             </div>
-                            <div class="md:col-span-2 flex justify-end">
+
+                            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-2">
+                                <!-- Lower Secondary Exam Days -->
+                                <div class="p-3.5 rounded-xl border border-sky-200 bg-sky-50/30 space-y-2.5">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-xs font-bold text-sky-900"><i class="fas fa-calendar-alt mr-1"></i>วันสอบระดับ ม.ต้น (${state.settings.lowerDays.length} วัน)</span>
+                                        <button type="button" onclick="addDefaultExamDay('lower')" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white transition">
+                                            <i class="fas fa-plus mr-1"></i>เพิ่มวันสอบ ม.ต้น
+                                        </button>
+                                    </div>
+                                    <div class="space-y-2">${lowerDayInputs}</div>
+                                </div>
+
+                                <!-- Upper Secondary Exam Days -->
+                                <div class="p-3.5 rounded-xl border border-violet-200 bg-violet-50/30 space-y-2.5">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-xs font-bold text-violet-900"><i class="fas fa-calendar-alt mr-1"></i>วันสอบระดับ ม.ปลาย (${state.settings.upperDays.length} วัน)</span>
+                                        <button type="button" onclick="addDefaultExamDay('upper')" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-violet-600 hover:bg-violet-700 text-white transition">
+                                            <i class="fas fa-plus mr-1"></i>เพิ่มวันสอบ ม.ปลาย
+                                        </button>
+                                    </div>
+                                    <div class="space-y-2">${upperDayInputs}</div>
+                                </div>
+                            </div>
+
+                            <div class="flex justify-end">
                                 <button type="submit" class="theme-btn px-5 py-2.5 rounded-xl text-sm font-bold shadow-sm transition">
                                     <i class="fas fa-save mr-1.5"></i>บันทึกข้อมูลหัวข้อและวันสอบ
                                 </button>
@@ -2981,7 +3767,7 @@
                                         <div class="flex flex-wrap gap-2">
                                             <label class="cursor-pointer theme-btn px-3.5 py-2 rounded-xl text-xs font-bold shadow-sm inline-flex items-center gap-1.5">
                                                 <i class="fas fa-upload"></i> เลือกรูปตราโรงเรียน
-                                                <input type="file" accept="image/*" class="hidden" onchange="handleLogoUpload(event)">
+                                                <input type="file" id="logo-file-input" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" class="hidden" onchange="handleLogoUpload(event)">
                                             </label>
                                             ${state.settings.logoDataUrl ? `
                                                 <button type="button" onclick="removeLogo()" class="px-3 py-2 rounded-xl text-xs font-bold bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 transition">
@@ -2989,7 +3775,7 @@
                                                 </button>
                                             ` : ''}
                                         </div>
-                                        <p class="text-[11px] text-gray-500">รองรับ PNG / JPG (แสดงบนหน้า Login, แถบเมนู, ภาพ PNG, Word และ PDF)</p>
+                                        <p class="text-[11px] text-gray-500">รองรับ PNG / JPG / WebP / SVG ขนาดไม่เกิน 15MB (ระบบย่อขนาดและบีบอัดให้อัตโนมัติ)</p>
                                     </div>
                                 </div>
                             </div>
@@ -3014,7 +3800,47 @@
                         </div>
                     </div>
 
-                    <!-- Section 2: Google Sheets Sync & CSV Import/Export for Teacher Accounts -->
+                    <!-- Section 3: Dynamic Grade Groups & Per-Grade Custom Exam Days/Time Slots -->
+                    <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6 space-y-4">
+                        <div>
+                            <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+                                <i class="fas fa-layer-group theme-text"></i> จัดการระดับชั้น (ม.) / กลุ่มห้องสอบ & ตั้งค่าวัน-เวลาสอบแยกเฉพาะชั้น
+                            </h2>
+                            <p class="text-xs text-gray-500 mt-0.5">
+                                สามารถเพิ่มระดับชั้นหรือกลุ่มห้องสอบใหม่ได้ไม่จำกัด และกด <strong>"ตั้งค่าวัน/เวลา"</strong> ในแต่ละชั้นหากบาง ม. สอบไม่ตรงวันหรือเวลาเดียวกับ ม.อื่น
+                            </p>
+                        </div>
+
+                        <form onsubmit="handleAddGradeGroup(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                            <input type="text" id="new-g-short" required placeholder="ชื่อย่อ เช่น ม.1 พิเศษ / ม.4/11" class="border border-gray-300 rounded-xl p-2.5 text-sm bg-white outline-none">
+                            <input type="text" id="new-g-name" required placeholder="ชื่อเต็ม เช่น ชั้นมัธยมศึกษาปีที่ 1 ห้องพิเศษ" class="lg:col-span-2 border border-gray-300 rounded-xl p-2.5 text-sm bg-white outline-none">
+                            <select id="new-g-level" class="border border-gray-300 rounded-xl p-2.5 text-sm bg-white outline-none">
+                                <option value="lower">กลุ่ม ม.ต้น</option>
+                                <option value="upper">กลุ่ม ม.ปลาย</option>
+                                <option value="custom">กลุ่มสอบพิเศษ (กำหนดวัน/เวลาเอง)</option>
+                            </select>
+                            <button type="submit" class="theme-btn py-2.5 px-4 rounded-xl text-sm font-bold shadow-sm transition flex items-center justify-center gap-1.5">
+                                <i class="fas fa-plus-circle"></i> เพิ่ม ม./กลุ่มสอบ
+                            </button>
+                        </form>
+
+                        <div class="overflow-x-auto border border-gray-200 rounded-xl">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="bg-gray-50 text-gray-600 text-xs uppercase border-b border-gray-200">
+                                        <th class="p-3 font-bold">กลุ่มระดับ</th>
+                                        <th class="p-3 font-bold">ชื่อย่อ</th>
+                                        <th class="p-3 font-bold">ชื่อระดับชั้น / ห้องสอบ</th>
+                                        <th class="p-3 font-bold">วันและเวลาสอบที่ใช้</th>
+                                        <th class="p-3 font-bold text-right">จัดการ</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${gradeRowsHtml}</tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Section 4: Google Sheets Sync & CSV Import/Export for Teacher Accounts -->
                     <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6 space-y-4">
                         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                             <div>
@@ -3114,57 +3940,977 @@
             e.preventDefault();
             state.settings.schoolName = document.getElementById('set-school').value.trim();
             state.settings.termSubtitle = document.getElementById('set-term').value.trim();
-            state.settings.lowerDays = [
-                document.getElementById('set-lower-0').value.trim(),
-                document.getElementById('set-lower-1').value.trim()
-            ];
-            state.settings.upperDays = [
-                document.getElementById('set-upper-0').value.trim(),
-                document.getElementById('set-upper-1').value.trim(),
-                document.getElementById('set-upper-2').value.trim()
-            ];
+
+            const lowerInputs = Array.from(document.querySelectorAll('[data-lower-day]'))
+                .map(el => el.value.trim())
+                .filter(Boolean);
+            const upperInputs = Array.from(document.querySelectorAll('[data-upper-day]'))
+                .map(el => el.value.trim())
+                .filter(Boolean);
+
+            if (lowerInputs.length > 0) state.settings.lowerDays = lowerInputs;
+            if (upperInputs.length > 0) state.settings.upperDays = upperInputs;
+
             saveState('saveSettings', { settings: state.settings, isSchedulePublished: state.isSchedulePublished });
             showToast('บันทึกข้อมูลโรงเรียนและวันสอบเรียบร้อยแล้ว', 'success');
             render();
         }
 
-        function handleLogoUpload(event) {
-            const file = event.target.files?.[0];
-            if (!file) return;
-            if (file.size > 3000000) {
-                showToast('ไฟล์รูปภาพมีขนาดใหญ่เกิน 3MB กรุณาเลือกไฟล์ขนาดเล็กลง', 'warning');
+        function addDefaultExamDay(level) {
+            // เก็บค่าที่ผู้ใช้กำลังพิมพ์ค้างอยู่ในช่องก่อนเพิ่มวันใหม่
+            const selector = level === 'lower' ? '[data-lower-day]' : '[data-upper-day]';
+            const currentVals = Array.from(document.querySelectorAll(selector)).map(el => el.value.trim());
+            const list = currentVals.length > 0 ? currentVals : (level === 'lower' ? [...state.settings.lowerDays] : [...state.settings.upperDays]);
+            list.push(`วันสอบที่ ${list.length + 1} (ระบุวัน/เดือน/ปี)`);
+            if (level === 'lower') {
+                state.settings.lowerDays = list;
+            } else {
+                state.settings.upperDays = list;
+            }
+            saveState('saveSettings', { settings: state.settings, isSchedulePublished: state.isSchedulePublished });
+            showToast(`เพิ่มวันสอบ ${level === 'lower' ? 'ม.ต้น' : 'ม.ปลาย'} แล้ว`, 'success');
+            render();
+        }
+
+        function removeDefaultExamDay(level, idx) {
+            const list = level === 'lower' ? state.settings.lowerDays : state.settings.upperDays;
+            if (list.length <= 1) {
+                showToast('ต้องมีวันสอบอย่างน้อย 1 วัน', 'warning');
                 return;
             }
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const img = new Image();
-                img.onload = () => {
-                    // ย่อขนาดอัตโนมัติไม่เกิน 220px เพื่อเก็บใน Google Sheets ได้อย่างปลอดภัย
-                    const maxDim = 220;
-                    let w = img.width;
-                    let h = img.height;
-                    if (w > maxDim || h > maxDim) {
-                        if (w >= h) {
-                            h = Math.round((h * maxDim) / w);
-                            w = maxDim;
-                        } else {
-                            w = Math.round((w * maxDim) / h);
-                            h = maxDim;
+            openConfirmModal(
+                'ลบวันสอบ',
+                `ต้องการลบวันสอบ "${list[idx]}" ใช่หรือไม่? (รายวิชาที่เคยจัดลงวันนี้จะถูกย้ายกลับไปช่องรอจัดตาราง)`,
+                () => {
+                    list.splice(idx, 1);
+                    // ปรับ dayIndex ของรายวิชาที่ใช้ตารางวันมาตรฐานของระดับนี้
+                    state.subjects.forEach(sub => {
+                        const g = getGradeObj(sub.gradeId);
+                        if (!g.useCustomDays && g.level === level && sub.dayIndex !== null) {
+                            if (sub.dayIndex === idx) {
+                                sub.dayIndex = null;
+                                sub.slotId = null;
+                            } else if (sub.dayIndex > idx) {
+                                sub.dayIndex -= 1;
+                            }
                         }
-                    }
-                    const canvas = document.createElement('canvas');
-                    canvas.width = w;
-                    canvas.height = h;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, w, h);
-                    state.settings.logoDataUrl = canvas.toDataURL('image/png');
-                    saveState('saveSettings', { settings: state.settings, isSchedulePublished: state.isSchedulePublished });
-                    showToast('อัปโหลดตราโรงเรียนเรียบร้อยแล้ว', 'success');
+                    });
+                    saveState('saveAll');
+                    showToast('ลบวันสอบเรียบร้อยแล้ว', 'info');
                     render();
+                }
+            );
+        }
+
+        function handleAddGradeGroup(e) {
+            e.preventDefault();
+            const shortName = document.getElementById('new-g-short').value.trim();
+            const fullName = document.getElementById('new-g-name').value.trim();
+            const level = document.getElementById('new-g-level').value;
+            if (!shortName || !fullName) return;
+
+            const newId = 'g_' + Date.now();
+            const isCustomLevel = level === 'custom';
+            const newGroup = {
+                id: newId,
+                name: fullName,
+                short: shortName,
+                level: level,
+                useCustomDays: isCustomLevel,
+                customDays: isCustomLevel ? [...state.settings.lowerDays] : [],
+                useCustomSlots: false,
+                customSlots: []
+            };
+            state.settings.gradeGroups.push(newGroup);
+            saveState('saveSettings', { settings: state.settings, isSchedulePublished: state.isSchedulePublished });
+            showToast(`เพิ่มระดับชั้น "${fullName}" เรียบร้อยแล้ว`, 'success');
+            render();
+            if (isCustomLevel) {
+                openGradeConfigModal(newId);
+            }
+        }
+
+        function confirmDeleteGradeGroup(gradeId) {
+            const g = getGradeObj(gradeId);
+            if (!g || getGradeGroups().length <= 1) return;
+            const subCount = state.subjects.filter(s => s.gradeId === gradeId).length;
+            openConfirmModal(
+                'ลบระดับชั้น / กลุ่มห้องสอบ',
+                `ต้องการลบ "${g.name}" ออกจากระบบใช่หรือไม่?` + (subCount > 0 ? ` (รายวิชาที่ผูกกับชั้นนี้จำนวน ${subCount} วิชาจะถูกลบออกด้วย)` : ''),
+                () => {
+                    state.settings.gradeGroups = state.settings.gradeGroups.filter(item => item.id !== gradeId);
+                    state.subjects = state.subjects.filter(s => s.gradeId !== gradeId);
+                    if (state.selectedAdminGrade === gradeId) {
+                        state.selectedAdminGrade = state.settings.gradeGroups[0].id;
+                    }
+                    if (state.exportFilterGrade === gradeId) {
+                        state.exportFilterGrade = 'all';
+                    }
+                    saveState('saveAll');
+                    showToast(`ลบ "${g.name}" เรียบร้อยแล้ว`, 'info');
+                    render();
+                }
+            );
+        }
+
+        // ==========================================
+        // 8.2 GRADE CUSTOM DAYS & TIME SLOTS MODAL
+        // ==========================================
+        function openGradeConfigModal(gradeId) {
+            const g = getGradeObj(gradeId);
+            if (!g) return;
+            state.editingGradeConfigId = gradeId;
+            state.gradeConfigDraft = {
+                name: g.name,
+                short: g.short,
+                level: g.level,
+                useCustomDays: Boolean(g.useCustomDays),
+                customDays: (Array.isArray(g.customDays) && g.customDays.length > 0)
+                    ? [...g.customDays]
+                    : [...getDaysForGrade(gradeId)],
+                useCustomSlots: Boolean(g.useCustomSlots),
+                customSlots: (Array.isArray(g.customSlots) && g.customSlots.length > 0)
+                    ? JSON.parse(JSON.stringify(g.customSlots))
+                    : JSON.parse(JSON.stringify(getSlotsForGrade(gradeId)))
+            };
+            document.getElementById('grade-config-subtitle').textContent = `ตั้งค่าเฉพาะสำหรับ: ${g.name}`;
+            renderGradeConfigModalBody();
+            const modal = document.getElementById('grade-config-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeGradeConfigModal() {
+            const modal = document.getElementById('grade-config-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            state.editingGradeConfigId = null;
+            state.gradeConfigDraft = null;
+        }
+
+        function syncGradeConfigDraftFromInputs() {
+            if (!state.gradeConfigDraft) return;
+            const nameEl = document.getElementById('gc-name');
+            const shortEl = document.getElementById('gc-short');
+            const levelEl = document.getElementById('gc-level');
+            const useDaysEl = document.getElementById('gc-use-custom-days');
+            const useSlotsEl = document.getElementById('gc-use-custom-slots');
+            if (nameEl) state.gradeConfigDraft.name = nameEl.value.trim();
+            if (shortEl) state.gradeConfigDraft.short = shortEl.value.trim();
+            if (levelEl) state.gradeConfigDraft.level = levelEl.value;
+            if (useDaysEl) state.gradeConfigDraft.useCustomDays = useDaysEl.checked;
+            if (useSlotsEl) state.gradeConfigDraft.useCustomSlots = useSlotsEl.checked;
+
+            const dayInputs = document.querySelectorAll('[data-gc-day]');
+            if (dayInputs.length > 0) {
+                state.gradeConfigDraft.customDays = Array.from(dayInputs).map(el => el.value.trim());
+            }
+            const slotRows = document.querySelectorAll('[data-gc-slot-idx]');
+            if (slotRows.length > 0) {
+                state.gradeConfigDraft.customSlots = Array.from(slotRows).map(row => {
+                    const idx = Number(row.getAttribute('data-gc-slot-idx'));
+                    const orig = state.gradeConfigDraft.customSlots[idx] || {};
+                    const labelVal = row.querySelector('[data-gc-slot-label]')?.value.trim() || orig.label;
+                    const periodVal = row.querySelector('[data-gc-slot-period]')?.value || orig.period || 'morning';
+                    const parsedStart = parseTimeStringToMin(labelVal);
+                    return {
+                        id: orig.id || ('cs_' + Date.now() + '_' + idx),
+                        label: labelVal,
+                        startMin: parsedStart !== null ? parsedStart : (orig.startMin || 540),
+                        period: periodVal
+                    };
+                });
+            }
+        }
+
+        function renderGradeConfigModalBody() {
+            const d = state.gradeConfigDraft;
+            if (!d) return;
+
+            const daysListHtml = d.customDays.map((dayStr, i) => `
+                <div class="flex items-center gap-2">
+                    <span class="text-xs font-bold text-amber-800 bg-amber-100 px-2.5 py-2 rounded-lg whitespace-nowrap">วันที่ ${i + 1}</span>
+                    <input type="text" data-gc-day="${i}" value="${escapeHtml(dayStr)}" placeholder="เช่น จันทร์ 28 กันยายน 2569"
+                        class="flex-grow border border-gray-300 rounded-xl p-2 text-sm bg-white outline-none">
+                    ${d.customDays.length > 1 ? `
+                        <button type="button" onclick="removeGradeConfigDay(${i})" class="w-9 h-9 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 flex items-center justify-center flex-shrink-0">
+                            <i class="fas fa-trash-alt text-xs"></i>
+                        </button>
+                    ` : ''}
+                </div>
+            `).join('');
+
+            const slotsListHtml = d.customSlots.map((sl, i) => `
+                <div data-gc-slot-idx="${i}" class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-white p-2 rounded-xl border border-gray-200">
+                    <input type="text" data-gc-slot-label value="${escapeHtml(sl.label)}" placeholder="เช่น 08.30-09.30 น."
+                        class="flex-grow border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs sm:text-sm outline-none">
+                    <div class="flex items-center gap-2">
+                        <select data-gc-slot-period class="border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white outline-none">
+                            <option value="morning" ${sl.period === 'morning' ? 'selected' : ''}>ภาคเช้า</option>
+                            <option value="lunch" ${sl.period === 'lunch' ? 'selected' : ''}>พักกลางวัน</option>
+                            <option value="afternoon" ${sl.period === 'afternoon' ? 'selected' : ''}>ภาคบ่าย</option>
+                        </select>
+                        ${d.customSlots.length > 1 ? `
+                            <button type="button" onclick="removeGradeConfigSlot(${i})" class="w-8 h-8 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 flex items-center justify-center flex-shrink-0">
+                                <i class="fas fa-times text-xs"></i>
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+            `).join('');
+
+            document.getElementById('grade-config-body').innerHTML = `
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อย่อ</label>
+                        <input type="text" id="gc-short" value="${escapeHtml(d.short)}" class="w-full border border-gray-300 rounded-xl p-2 text-sm outline-none">
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อเต็มระดับชั้น / ห้องสอบ</label>
+                        <input type="text" id="gc-name" value="${escapeHtml(d.name)}" class="w-full border border-gray-300 rounded-xl p-2 text-sm outline-none">
+                    </div>
+                    <div class="sm:col-span-3">
+                        <label class="block text-xs font-bold text-gray-700 mb-1">กลุ่มระดับชั้นหลัก</label>
+                        <select id="gc-level" class="w-full border border-gray-300 rounded-xl p-2 text-sm bg-white outline-none">
+                            <option value="lower" ${d.level === 'lower' ? 'selected' : ''}>กลุ่ม ม.ต้น</option>
+                            <option value="upper" ${d.level === 'upper' ? 'selected' : ''}>กลุ่ม ม.ปลาย</option>
+                            <option value="custom" ${d.level === 'custom' ? 'selected' : ''}>กลุ่มสอบพิเศษ (กำหนดเอง)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Custom Exam Days Toggle -->
+                <div class="p-4 rounded-xl border ${d.useCustomDays ? 'border-amber-300 bg-amber-50/40' : 'border-gray-200 bg-gray-50'} space-y-3">
+                    <label class="flex items-center gap-2.5 cursor-pointer">
+                        <input type="checkbox" id="gc-use-custom-days" ${d.useCustomDays ? 'checked' : ''} onchange="toggleGradeConfigFlag('useCustomDays', this.checked)" class="w-4 h-4 rounded accent-amber-600">
+                        <span class="text-sm font-bold text-gray-800">กำหนดวันสอบเฉพาะชั้นนี้ (กรณีสอบคนละวันกับชั้นอื่น)</span>
+                    </label>
+                    ${d.useCustomDays ? `
+                        <div class="space-y-2 pt-1">
+                            ${daysListHtml}
+                            <button type="button" onclick="addGradeConfigDay()" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white transition">
+                                <i class="fas fa-plus mr-1"></i>เพิ่มวันสอบเฉพาะชั้นนี้
+                            </button>
+                        </div>
+                    ` : `<p class="text-xs text-gray-500">กำลังใช้วันสอบมาตรฐานของกลุ่ม ${d.level === 'upper' ? 'ม.ปลาย' : 'ม.ต้น'}</p>`}
+                </div>
+
+                <!-- Custom Time Slots Toggle -->
+                <div class="p-4 rounded-xl border ${d.useCustomSlots ? 'border-indigo-300 bg-indigo-50/40' : 'border-gray-200 bg-gray-50'} space-y-3">
+                    <label class="flex items-center gap-2.5 cursor-pointer">
+                        <input type="checkbox" id="gc-use-custom-slots" ${d.useCustomSlots ? 'checked' : ''} onchange="toggleGradeConfigFlag('useCustomSlots', this.checked)" class="w-4 h-4 rounded accent-indigo-600">
+                        <span class="text-sm font-bold text-gray-800">กำหนดช่วงเวลาสอบเฉพาะชั้นนี้ (กรณีเวลาเริ่มสอบไม่ตรงกับชั้นอื่น)</span>
+                    </label>
+                    ${d.useCustomSlots ? `
+                        <div class="space-y-2 pt-1">
+                            ${slotsListHtml}
+                            <button type="button" onclick="addGradeConfigSlot()" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white transition">
+                                <i class="fas fa-plus mr-1"></i>เพิ่มช่วงเวลาสอบ
+                            </button>
+                        </div>
+                    ` : `<p class="text-xs text-gray-500">กำลังใช้ช่วงเวลาสอบมาตรฐานของโรงเรียน (09.00 - 16.00 น.)</p>`}
+                </div>
+            `;
+        }
+
+        function toggleGradeConfigFlag(flag, checked) {
+            syncGradeConfigDraftFromInputs();
+            state.gradeConfigDraft[flag] = checked;
+            renderGradeConfigModalBody();
+        }
+
+        function addGradeConfigDay() {
+            syncGradeConfigDraftFromInputs();
+            state.gradeConfigDraft.customDays.push(`วันสอบที่ ${state.gradeConfigDraft.customDays.length + 1} (ระบุวันที่)`);
+            renderGradeConfigModalBody();
+        }
+
+        function removeGradeConfigDay(idx) {
+            syncGradeConfigDraftFromInputs();
+            if (state.gradeConfigDraft.customDays.length <= 1) return;
+            state.gradeConfigDraft.customDays.splice(idx, 1);
+            renderGradeConfigModalBody();
+        }
+
+        function addGradeConfigSlot() {
+            syncGradeConfigDraftFromInputs();
+            state.gradeConfigDraft.customSlots.push({
+                id: 'cs_' + Date.now() + '_' + Math.floor(Math.random() * 100),
+                label: '15.30-16.30 น.',
+                startMin: 930,
+                period: 'afternoon'
+            });
+            renderGradeConfigModalBody();
+        }
+
+        function removeGradeConfigSlot(idx) {
+            syncGradeConfigDraftFromInputs();
+            if (state.gradeConfigDraft.customSlots.length <= 1) return;
+            state.gradeConfigDraft.customSlots.splice(idx, 1);
+            renderGradeConfigModalBody();
+        }
+
+        function saveGradeConfigModal() {
+            syncGradeConfigDraftFromInputs();
+            const g = getGradeObj(state.editingGradeConfigId);
+            const d = state.gradeConfigDraft;
+            if (!g || !d) return;
+
+            g.name = d.name || g.name;
+            g.short = d.short || g.short;
+            g.level = d.level || g.level;
+            g.useCustomDays = Boolean(d.useCustomDays);
+            g.customDays = d.useCustomDays ? d.customDays.filter(Boolean) : [];
+            if (g.useCustomDays && g.customDays.length === 0) g.useCustomDays = false;
+
+            g.useCustomSlots = Boolean(d.useCustomSlots);
+            g.customSlots = d.useCustomSlots ? d.customSlots.filter(s => s.label) : [];
+            if (g.useCustomSlots && g.customSlots.length === 0) g.useCustomSlots = false;
+
+            // ตรวจสอบรายวิชาในชั้นนี้ว่าวันและช่วงเวลายังมีอยู่จริง
+            const validDaysLen = getDaysForGrade(g.id).length;
+            const validSlotIds = new Set(getSlotsForGrade(g.id).filter(s => s.period !== 'lunch').map(s => s.id));
+            state.subjects.forEach(sub => {
+                if (sub.gradeId === g.id) {
+                    if (sub.dayIndex !== null && sub.dayIndex >= validDaysLen) {
+                        sub.dayIndex = null;
+                        sub.slotId = null;
+                    }
+                    if (sub.slotId !== null && !validSlotIds.has(sub.slotId)) {
+                        sub.dayIndex = null;
+                        sub.slotId = null;
+                    }
+                }
+            });
+
+            saveState('saveAll');
+            closeGradeConfigModal();
+            showToast(`บันทึกการตั้งค่าวันและเวลาสอบของ "${g.short}" เรียบร้อยแล้ว`, 'success');
+            render();
+        }
+
+        // ==========================================
+        // 8.3 LOGO UPLOAD (FIXED & COMPRESSED FOR RELIABLE DISPLAY + CLOUD SYNC)
+        // ==========================================
+        function handleLogoUpload(event) {
+            const inputEl = event.target;
+            const file = inputEl.files?.[0];
+            if (!file) return;
+
+            if (!file.type.startsWith('image/')) {
+                showToast('กรุณาเลือกไฟล์รูปภาพ (PNG, JPG, WebP, SVG) เท่านั้น', 'warning');
+                inputEl.value = '';
+                return;
+            }
+            if (file.size > 15 * 1024 * 1024) {
+                showToast('ไฟล์รูปภาพมีขนาดใหญ่เกิน 15MB กรุณาเลือกไฟล์ขนาดเล็กลง', 'warning');
+                inputEl.value = '';
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onerror = () => {
+                showToast('ไม่สามารถอ่านไฟล์รูปภาพได้ กรุณาลองใหม่อีกครั้ง', 'error');
+                inputEl.value = '';
+            };
+            reader.onload = (e) => {
+                const rawDataUrl = e.target.result;
+                const img = new Image();
+                img.onerror = () => {
+                    showToast('ไฟล์รูปภาพเสียหายหรือไม่รองรับในเบราว์เซอร์นี้ กรุณาใช้ไฟล์ PNG หรือ JPG', 'error');
+                    inputEl.value = '';
                 };
-                img.src = e.target.result;
+                img.onload = () => {
+                    try {
+                        const natW = img.naturalWidth || img.width || 200;
+                        const natH = img.naturalHeight || img.height || 200;
+
+                        const renderToDataUrl = (maxDim, mime, quality, fillWhite) => {
+                            let w = natW;
+                            let h = natH;
+                            if (w > maxDim || h > maxDim) {
+                                if (w >= h) {
+                                    h = Math.max(1, Math.round((h * maxDim) / w));
+                                    w = maxDim;
+                                } else {
+                                    w = Math.max(1, Math.round((w * maxDim) / h));
+                                    h = maxDim;
+                                }
+                            }
+                            const canvas = document.createElement('canvas');
+                            canvas.width = w;
+                            canvas.height = h;
+                            const ctx = canvas.getContext('2d');
+                            if (fillWhite) {
+                                ctx.fillStyle = '#ffffff';
+                                ctx.fillRect(0, 0, w, h);
+                            } else {
+                                ctx.clearRect(0, 0, w, h);
+                            }
+                            ctx.drawImage(img, 0, 0, w, h);
+                            return canvas.toDataURL(mime, quality);
+                        };
+
+                        // คงพื้นหลังโปร่งใสด้วย PNG ก่อน และย่อขนาดให้พอเหมาะกับทั้งหน้าเว็บและ Google Sheets
+                        let finalDataUrl = renderToDataUrl(180, 'image/png', 0.92, false);
+                        if (finalDataUrl.length > 42000) {
+                            finalDataUrl = renderToDataUrl(140, 'image/png', 0.9, false);
+                        }
+                        if (finalDataUrl.length > 45000) {
+                            finalDataUrl = renderToDataUrl(180, 'image/jpeg', 0.85, true);
+                        }
+
+                        if (!finalDataUrl || !finalDataUrl.startsWith('data:image/')) {
+                            finalDataUrl = rawDataUrl;
+                        }
+
+                        state.settings.logoDataUrl = finalDataUrl;
+                        saveState('saveSettings', { settings: state.settings, isSchedulePublished: state.isSchedulePublished });
+                        showToast('อัปโหลดและแสดงตราโรงเรียนเรียบร้อยแล้ว', 'success');
+                        render();
+                    } catch (err) {
+                        console.error('Logo Canvas Error:', err);
+                        // Fallback กรณีรูปเป็น SVG หรือ Canvas ทำงานไม่ได้
+                        state.settings.logoDataUrl = rawDataUrl;
+                        saveState('saveSettings', { settings: state.settings, isSchedulePublished: state.isSchedulePublished });
+                        showToast('อัปโหลดตราโรงเรียนเรียบร้อยแล้ว', 'success');
+                        render();
+                    } finally {
+                        inputEl.value = '';
+                    }
+                };
+                img.src = rawDataUrl;
             };
             reader.readAsDataURL(file);
+        }
+
+        // ==========================================
+        // 8.4 TERM ARCHIVE FOLDER (.ZIP) & SAFE NEW TERM / CLEAR DATA WIZARD
+        // ==========================================
+        function sanitizeFilename(name) {
+            return String(name || 'exam_folder').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_').trim();
+        }
+
+        function buildCurrentSnapshot() {
+            return {
+                version: 3,
+                exportedAt: new Date().toISOString(),
+                isSchedulePublished: state.isSchedulePublished,
+                settings: JSON.parse(JSON.stringify(state.settings)),
+                users: JSON.parse(JSON.stringify(state.users)),
+                subjects: JSON.parse(JSON.stringify(state.subjects))
+            };
+        }
+
+        function createArchiveRecordFromCurrent(customFolderName) {
+            const folderName = (customFolderName || `${getExamMainTitle()}_${getTermSubtitle()}`).trim();
+            const snapshot = buildCurrentSnapshot();
+            return {
+                id: 'arch_' + Date.now(),
+                folderName,
+                examType: state.settings.examType,
+                termSubtitle: state.settings.termSubtitle,
+                archivedAt: new Date().toISOString(),
+                subjectCount: state.subjects.length,
+                userCount: state.users.length,
+                driveFolderUrl: '',
+                snapshot
+            };
+        }
+
+        function buildGradeHtmlForSnapshot(grade, snapshot) {
+            const settings = ensureSettingsIntegrity(snapshot.settings);
+            const days = (grade.useCustomDays && grade.customDays.length > 0)
+                ? grade.customDays
+                : (grade.level === 'upper' ? settings.upperDays : settings.lowerDays);
+            const timeSlots = (grade.useCustomSlots && grade.customSlots.length > 0)
+                ? grade.customSlots
+                : settings.defaultTimeSlots;
+            const gradeSubjects = (snapshot.subjects || []).filter(s => s.gradeId === grade.id && s.dayIndex !== null && s.slotId !== null);
+
+            const logoHtml = settings.logoDataUrl
+                ? `<div class="text-center"><img src="${settings.logoDataUrl}" alt="ตราโรงเรียน" style="width:64px;height:64px;object-fit:contain;"></div>`
+                : '';
+
+            const headerHtml = `
+                <div class="text-center" style="margin-bottom:10px;">
+                    ${logoHtml}
+                    <div>${escapeHtml(settings.schoolName)}</div>
+                    <div class="doc-bold" style="font-size:1.25em;">ตารางสอบ${escapeHtml(settings.examType || 'ปลายภาค')}</div>
+                    <div class="doc-bold">${escapeHtml(settings.termSubtitle || '')}</div>
+                    <div class="doc-bold">${escapeHtml(grade.name)}</div>
+                </div>
+            `;
+
+            const dayTablesHtml = days.map((dayLabel, dIdx) => {
+                const daySubjects = gradeSubjects.filter(s => s.dayIndex === dIdx);
+                if (daySubjects.length === 0) return '';
+
+                const rows = [];
+                let hasMorning = false;
+                let hasAfternoon = false;
+
+                timeSlots.forEach(slot => {
+                    if (slot.period === 'lunch') {
+                        rows.push({ isLunch: true, label: slot.label });
+                        return;
+                    }
+                    const slotSubs = daySubjects.filter(s => s.slotId === slot.id);
+                    slotSubs.forEach((sub, idx) => {
+                        if (slot.period === 'morning') hasMorning = true;
+                        if (slot.period === 'afternoon') hasAfternoon = true;
+                        const dur = Number(sub.duration);
+                        const timeText = (dur > 0 && slot.startMin)
+                            ? `${formatMinutesToTime(slot.startMin)}-${formatMinutesToTime(slot.startMin + dur)} น.`
+                            : slot.label;
+                        rows.push({
+                            isLunch: false,
+                            showTime: idx === 0,
+                            timeText,
+                            code: sub.code,
+                            name: getSubjectDisplayName(sub),
+                            duration: `${sub.duration} นาที`,
+                            teachers: formatTeachersDisplay(sub.teachers)
+                        });
+                    });
+                });
+
+                const cleanRows = rows.filter(r => !r.isLunch || (hasMorning && hasAfternoon));
+                const totalRows = cleanRows.length;
+                const trHtml = cleanRows.map((r, rIdx) => {
+                    const dayCell = rIdx === 0
+                        ? `<td rowspan="${totalRows}" class="text-center doc-bold" style="width:115px;">${escapeHtml(dayLabel)}</td>`
+                        : '';
+                    if (r.isLunch) {
+                        return `<tr class="lunch-row">${dayCell}<td colspan="5" class="text-center doc-bold">${escapeHtml(r.label)}</td></tr>`;
+                    }
+                    return `
+                        <tr>
+                            ${dayCell}
+                            <td class="text-center">${r.showTime ? escapeHtml(r.timeText) : ''}</td>
+                            <td class="text-center doc-bold">${escapeHtml(r.code)}</td>
+                            <td>${escapeHtml(r.name)}</td>
+                            <td class="text-center">${escapeHtml(r.duration)}</td>
+                            <td>${escapeHtml(r.teachers)}</td>
+                        </tr>
+                    `;
+                }).join('');
+
+                return `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width:115px;">วัน/เดือน/ปี</th>
+                                <th style="width:115px;">เวลา</th>
+                                <th style="width:90px;">รหัสวิชา</th>
+                                <th>รายวิชา</th>
+                                <th style="width:80px;">ระยะเวลา</th>
+                                <th>ครูผู้สอน</th>
+                            </tr>
+                        </thead>
+                        <tbody>${trHtml}</tbody>
+                    </table>
+                `;
+            }).filter(Boolean).join('');
+
+            return headerHtml + (dayTablesHtml || '<p class="text-center">ยังไม่มีรายวิชาที่จัดลงตารางสอบ</p>');
+        }
+
+        function buildCsvString(headers, rows) {
+            const esc = (v) => `"${String(v === null || v === undefined ? '' : v).replace(/"/g, '""')}"`;
+            return '\uFEFF' + [headers.map(esc).join(','), ...rows.map(r => r.map(esc).join(','))].join('\r\n');
+        }
+
+        async function exportArchiveFolderZip(archiveRecord) {
+            const snapshot = archiveRecord.snapshot || buildCurrentSnapshot();
+            const settings = ensureSettingsIntegrity(snapshot.settings);
+            const grades = settings.gradeGroups;
+            const subjects = snapshot.subjects || [];
+            const users = snapshot.users || [];
+            const safeFolder = sanitizeFilename(archiveRecord.folderName);
+
+            // 1. สร้างไฟล์ CSV แยกตามระดับชั้น / รายวิชา / ครู / รหัสผู้ใช้
+            const gradeCsvRows = [];
+            const subjectCsvRows = [];
+            const teacherRowsMap = new Map();
+
+            subjects.forEach(sub => {
+                const g = grades.find(x => x.id === sub.gradeId) || grades[0];
+                const days = (g.useCustomDays && g.customDays.length > 0) ? g.customDays : (g.level === 'upper' ? settings.upperDays : settings.lowerDays);
+                const slots = (g.useCustomSlots && g.customSlots.length > 0) ? g.customSlots : settings.defaultTimeSlots;
+                const slot = slots.find(s => s.id === sub.slotId);
+                const dayText = sub.dayIndex !== null ? (days[sub.dayIndex] || '-') : 'ยังไม่จัดวัน';
+                const timeText = slot
+                    ? ((Number(sub.duration) > 0 && slot.startMin) ? `${formatMinutesToTime(slot.startMin)}-${formatMinutesToTime(slot.startMin + Number(sub.duration))} น.` : slot.label)
+                    : 'ยังไม่จัดเวลา';
+                const tReadable = formatTeachersDisplay(sub.teachers);
+                const displaySubName = getSubjectDisplayName(sub);
+
+                gradeCsvRows.push([g.name, dayText, timeText, sub.code, displaySubName, sub.duration, tReadable]);
+                subjectCsvRows.push([sub.code, displaySubName, g.short, dayText, timeText, sub.duration, formatTeachersDisplay(sub.teachers, true)]);
+
+                (sub.teachers || []).forEach(t => {
+                    const tName = (t.name || '').trim();
+                    if (!tName) return;
+                    if (!teacherRowsMap.has(tName)) teacherRowsMap.set(tName, []);
+                    teacherRowsMap.get(tName).push([tName, t.department || '', dayText, timeText, g.name, sub.code, displaySubName, sub.duration, t.rooms || '-']);
+                });
+            });
+
+            const teacherCsvRows = [];
+            Array.from(teacherRowsMap.keys()).sort((a, b) => a.localeCompare(b, 'th')).forEach(tName => {
+                teacherRowsMap.get(tName).forEach(r => teacherCsvRows.push(r));
+            });
+            const userCsvRows = users.map(u => [u.username, u.password, u.name, u.department || '', u.role]);
+
+            // 2. สร้างไฟล์ Word (.doc) รวมทุกชั้น และรายชั้น และใบเซ็นรับ-ส่งข้อสอบแต่ละห้อง
+            const allGradesWordBody = grades.map((g, idx) => {
+                const body = buildGradeHtmlForSnapshot(g, snapshot);
+                const br = idx < grades.length - 1 ? '<br clear="all" style="page-break-before:always" />' : '';
+                return `<div>${body}</div>${br}`;
+            }).join('');
+
+            const allHandoverBlocks = [];
+            grades.forEach(g => {
+                const rooms = (Array.isArray(g.roomsList) && g.roomsList.length > 0) ? g.roomsList : inferDefaultRoomsForGrade(g);
+                rooms.forEach(rName => {
+                    allHandoverBlocks.push(buildRoomHandoverTableHtml(g, rName, subjects));
+                });
+            });
+            const allHandoverWordBody = allHandoverBlocks.map((html, idx) => {
+                const br = idx < allHandoverBlocks.length - 1 ? '<br clear="all" style="page-break-before:always" />' : '';
+                return `<div>${html}</div>${br}`;
+            }).join('');
+
+            if (typeof JSZip !== 'function') {
+                // Fallback หากไม่สามารถโหลด JSZip ได้ ให้ดาวน์โหลดไฟล์ JSON + Word ตรงๆ
+                const jsonBlob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json;charset=utf-8' });
+                const jUrl = URL.createObjectURL(jsonBlob);
+                const jLink = document.createElement('a');
+                jLink.href = jUrl;
+                jLink.download = `${safeFolder}_Backup.json`;
+                jLink.click();
+                URL.revokeObjectURL(jUrl);
+                triggerWordDownload(`${safeFolder}_ตารางสอบทั้งหมด`, allGradesWordBody);
+                return;
+            }
+
+            try {
+                showToast('กำลังรวบรวมและบีบอัดโฟลเดอร์ข้อมูลทั้งหมด (.ZIP)...', 'info');
+                const zip = new JSZip();
+                const root = zip.folder(safeFolder);
+                const perGradeDir = root.folder('ตารางสอบรายระดับชั้น_Word');
+
+                root.file('01_ตารางสอบรวมทุกระดับชั้น.doc', '\uFEFF' + buildWordDocumentHtml(allGradesWordBody));
+                root.file('02_ตารางสอบแยกตามระดับชั้น.csv', buildCsvString(['ระดับชั้น', 'วันสอบ', 'เวลาสอบ', 'รหัสวิชา', 'รายวิชา', 'ระยะเวลา(นาที)', 'ครูผู้สอน'], gradeCsvRows));
+                root.file('03_ตารางสอบแยกตามครูผู้สอน.csv', buildCsvString(['ครูผู้สอน', 'กลุ่มสาระ', 'วันสอบ', 'เวลาสอบ', 'ระดับชั้น', 'รหัสวิชา', 'รายวิชา', 'ระยะเวลา(นาที)', 'ห้องที่สอน'], teacherCsvRows));
+                root.file('04_ตารางสอบแยกตามรายวิชา.csv', buildCsvString(['รหัสวิชา', 'รายวิชา', 'ระดับชั้น', 'วันสอบ', 'เวลาสอบ', 'ระยะเวลา(นาที)', 'ครูผู้สอน'], subjectCsvRows));
+                root.file('05_รายชื่อและรหัสผ่านผู้ใช้.csv', buildCsvString(['username', 'password', 'name', 'department', 'role'], userCsvRows));
+                root.file('06_ข้อมูลสำรองเต็มรูปแบบ_Backup.json', JSON.stringify(snapshot, null, 2));
+                if (allHandoverWordBody) {
+                    root.file('07_ใบเซ็นรับส่งข้อสอบแต่ละห้อง.doc', '\uFEFF' + buildWordDocumentHtml(allHandoverWordBody));
+                }
+
+                grades.forEach(g => {
+                    const gWord = '\uFEFF' + buildWordDocumentHtml(buildGradeHtmlForSnapshot(g, snapshot));
+                    perGradeDir.file(`ตารางสอบ_${sanitizeFilename(g.short)}.doc`, gWord);
+                });
+
+                const blob = await zip.generateAsync({ type: 'blob' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `${safeFolder}.zip`;
+                link.click();
+                URL.revokeObjectURL(url);
+                showToast(`ดาวน์โหลดโฟลเดอร์ ${safeFolder}.zip ครบทุกไฟล์เรียบร้อยแล้ว`, 'success');
+            } catch (err) {
+                console.error('ZIP Export Error:', err);
+                showToast('เกิดข้อผิดพลาดในการสร้างไฟล์ ZIP', 'error');
+            }
+        }
+
+        function openTermArchiveModal(mode) {
+            state.termArchiveMode = mode;
+            const defaultFolder = `${getExamMainTitle()}_${getTermSubtitle()}`;
+            const headerEl = document.getElementById('term-modal-header');
+            const titleEl = document.getElementById('term-modal-title');
+            const descEl = document.getElementById('term-modal-desc');
+            const iconEl = document.getElementById('term-modal-icon');
+            const btnEl = document.getElementById('term-modal-confirm-btn');
+
+            if (mode === 'archive_only') {
+                headerEl.className = 'bg-amber-600 text-white px-5 py-4 flex items-center justify-between';
+                iconEl.className = 'fas fa-folder-plus text-xl';
+                titleEl.textContent = 'บันทึกและส่งออกโฟลเดอร์ข้อมูลเทอมนี้';
+                descEl.textContent = 'จัดเก็บข้อมูลการสอบรอบปัจจุบันไว้ในคลังและส่งออกเป็นโฟลเดอร์ .ZIP (ข้อมูลปัจจุบันไม่ถูกลบ)';
+                btnEl.className = 'bg-amber-600 hover:bg-amber-700 text-white px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-sm transition flex items-center gap-1.5';
+                btnEl.innerHTML = '<i class="fas fa-save"></i> ยืนยันบันทึกและส่งออกโฟลเดอร์';
+            } else if (mode === 'new_term') {
+                headerEl.className = 'theme-bg text-white px-5 py-4 flex items-center justify-between';
+                iconEl.className = 'fas fa-calendar-plus text-xl';
+                titleEl.textContent = 'เปลี่ยนปีการศึกษา / เริ่มภาคเรียนหรือรอบสอบใหม่';
+                descEl.textContent = 'ระบบจะบันทึกและส่งออกข้อมูลเทอมเดิมเป็นโฟลเดอร์ก่อนเริ่มเทอมใหม่อย่างปลอดภัย';
+                btnEl.className = 'theme-btn px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-sm transition flex items-center gap-1.5';
+                btnEl.innerHTML = '<i class="fas fa-check-double"></i> ยืนยันบันทึกของเดิม & เริ่มเทอมใหม่';
+            } else {
+                headerEl.className = 'bg-red-600 text-white px-5 py-4 flex items-center justify-between';
+                iconEl.className = 'fas fa-exclamation-triangle text-xl';
+                titleEl.textContent = 'ยืนยันการล้างข้อมูล (พร้อมบันทึกสำรองก่อนลบ)';
+                descEl.textContent = 'แนะนำให้บันทึกและส่งออกโฟลเดอร์เก็บไว้ก่อนล้างข้อมูลทุกครั้ง';
+                btnEl.className = 'bg-red-600 hover:bg-red-700 text-white px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-sm transition flex items-center gap-1.5';
+                btnEl.innerHTML = '<i class="fas fa-trash-alt"></i> ยืนยันบันทึก & ล้างข้อมูล';
+            }
+
+            const newTermSection = mode === 'new_term' ? `
+                <div class="p-4 rounded-xl bg-blue-50/70 border border-blue-200 space-y-3">
+                    <div class="text-xs font-bold text-blue-900 flex items-center gap-1.5">
+                        <i class="fas fa-sparkles"></i> ข้อมูลสำหรับเทอมใหม่ / การสอบรอบใหม่
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-bold text-gray-700 mb-1">ประเภทการสอบใหม่</label>
+                            <select id="tm-new-exam-type" class="w-full border border-gray-300 rounded-xl p-2 text-sm bg-white outline-none">
+                                <option value="กลางภาค" ${state.settings.examType === 'ปลายภาค' ? 'selected' : ''}>สอบกลางภาค</option>
+                                <option value="ปลายภาค" ${state.settings.examType === 'กลางภาค' ? 'selected' : ''}>สอบปลายภาค</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-gray-700 mb-1">ภาคเรียน / ปีการศึกษาใหม่ *</label>
+                            <input type="text" id="tm-new-term-sub" value="${escapeHtml(state.settings.termSubtitle)}" placeholder="เช่น ภาคเรียนที่ 2 ปีการศึกษา 2569"
+                                class="w-full border border-gray-300 rounded-xl p-2 text-sm bg-white outline-none">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-1">การจัดการข้อมูลรายวิชาสอบเดิม</label>
+                        <select id="tm-new-term-clear-mode" class="w-full border border-gray-300 rounded-xl p-2 text-sm bg-white outline-none">
+                            <option value="clear_subjects">ล้างรายวิชาสอบเดิมทั้งหมดเพื่อเริ่มรับข้อมูลเทอมใหม่ (คงรหัสครูและตั้งค่าชั้นเรียนไว้)</option>
+                            <option value="clear_schedule_only">เก็บรายวิชาเดิมไว้ ล้างเฉพาะวันและเวลาที่จัดตารางสอบแล้ว</option>
+                            <option value="keep_all">คงรายวิชาและตารางสอบเดิมไว้ทั้งหมด (เปลี่ยนเฉพาะหัวข้อเทอม)</option>
+                        </select>
+                    </div>
+                </div>
+            ` : '';
+
+            const clearDataSection = mode === 'clear_data' ? `
+                <div class="p-4 rounded-xl bg-red-50 border border-red-200 space-y-2.5">
+                    <div class="text-xs font-bold text-red-900">เลือกรูปแบบการล้างข้อมูล</div>
+                    <select id="tm-clear-scope" class="w-full border border-red-300 rounded-xl p-2.5 text-sm bg-white outline-none">
+                        <option value="clear_schedule_only">ล้างเฉพาะวัน/เวลาในตารางสอบ (รายวิชาและชื่อครูยังอยู่ครบ)</option>
+                        <option value="clear_subjects">ล้างรายวิชาสอบทั้งหมด (คงรายชื่อครู รหัสผ่าน และการตั้งค่าระบบไว้)</option>
+                    </select>
+                </div>
+            ` : '';
+
+            document.getElementById('term-modal-body').innerHTML = `
+                <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 space-y-1">
+                    <div class="font-bold text-slate-900">สรุปข้อมูลปัจจุบันที่จะถูกจัดเก็บ:</div>
+                    <div>• หัวข้อปัจจุบัน: <strong>${escapeHtml(getExamMainTitle())} — ${escapeHtml(getTermSubtitle())}</strong></div>
+                    <div>• จำนวนรายวิชาสอบ: <strong>${state.subjects.length} รายวิชา</strong> • ระดับชั้น: <strong>${getGradeGroups().length} กลุ่ม</strong> • ผู้ใช้: <strong>${state.users.length} คน</strong></div>
+                </div>
+
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อโฟลเดอร์สำหรับเก็บข้อมูลเทอมเดิม *</label>
+                        <input type="text" id="tm-folder-name" value="${escapeHtml(defaultFolder)}" required
+                            class="w-full border border-gray-300 rounded-xl p-2.5 text-sm outline-none focus:ring-2 focus:ring-amber-500">
+                    </div>
+
+                    <div class="space-y-2 pt-1">
+                        <label class="flex items-start gap-2.5 cursor-pointer text-xs sm:text-sm text-gray-800">
+                            <input type="checkbox" id="tm-opt-archive" checked class="w-4 h-4 mt-0.5 rounded accent-amber-600">
+                            <span><strong>บันทึกเก็บไว้ในคลังโฟลเดอร์ของระบบ</strong> (และสำรองขึ้น Google Sheets / Google Drive)</span>
+                        </label>
+                        <label class="flex items-start gap-2.5 cursor-pointer text-xs sm:text-sm text-gray-800">
+                            <input type="checkbox" id="tm-opt-zip" checked class="w-4 h-4 mt-0.5 rounded accent-indigo-600">
+                            <span><strong>ส่งออกและดาวน์โหลดโฟลเดอร์ทั้งหมด (.ZIP)</strong> (รวม Word .doc ทุกชั้น + CSV + Backup .JSON)</span>
+                        </label>
+                    </div>
+                </div>
+
+                ${newTermSection}
+                ${clearDataSection}
+
+                ${mode !== 'archive_only' ? `
+                    <label class="flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 border border-amber-300 cursor-pointer text-xs font-bold text-amber-900">
+                        <input type="checkbox" id="tm-final-confirm" class="w-4 h-4 mt-0.5 rounded accent-red-600">
+                        <span>ข้าพเจ้าได้ตรวจสอบชื่อโฟลเดอร์และตัวเลือกการสำรองข้อมูลเรียบร้อยแล้ว และยืนยันดำเนินการ</span>
+                    </label>
+                ` : ''}
+            `;
+
+            const modal = document.getElementById('term-archive-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeTermArchiveModal() {
+            const modal = document.getElementById('term-archive-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        async function executeTermArchiveAction() {
+            const mode = state.termArchiveMode;
+            const folderName = document.getElementById('tm-folder-name')?.value.trim();
+            const doArchive = document.getElementById('tm-opt-archive')?.checked;
+            const doZip = document.getElementById('tm-opt-zip')?.checked;
+
+            if ((doArchive || doZip) && !folderName) {
+                showToast('กรุณาระบุชื่อโฟลเดอร์สำหรับเก็บข้อมูลเดิม', 'warning');
+                return;
+            }
+
+            if (mode !== 'archive_only') {
+                const confirmed = document.getElementById('tm-final-confirm')?.checked;
+                if (!confirmed) {
+                    showToast('กรุณาติ๊กช่องยืนยันก่อนดำเนินการลบหรือเปลี่ยนเทอมใหม่', 'warning');
+                    return;
+                }
+            }
+
+            const record = createArchiveRecordFromCurrent(folderName);
+
+            // 1. ส่งออกไฟล์ .ZIP โฟลเดอร์เทอมเดิมลงเครื่อง
+            if (doZip) {
+                await exportArchiveFolderZip(record);
+            }
+
+            // 2. บันทึกเข้าคลังโฟลเดอร์ในระบบ (และส่งขึ้น Google Sheets / Drive)
+            if (doArchive) {
+                state.archives = [record, ...(state.archives || [])];
+                saveState(null);
+                if (isCloudEnabled()) {
+                    try {
+                        setCloudStatus('syncing', 'กำลังบันทึกโฟลเดอร์ขึ้น Sheets...');
+                        const res = await cloudRequest('saveArchive', { archive: record });
+                        if (res && res.status === 'ok' && res.archive) {
+                            const idx = state.archives.findIndex(a => a.id === record.id);
+                            if (idx !== -1) state.archives[idx] = res.archive;
+                            saveState(null);
+                            setCloudStatus('synced', 'บันทึกโฟลเดอร์แล้ว');
+                        }
+                    } catch (err) {
+                        console.warn('Cloud Archive Error:', err);
+                        setCloudStatus('error', 'ซิงค์โฟลเดอร์ไม่สำเร็จ');
+                    }
+                }
+            }
+
+            // 3. ดำเนินการเปลี่ยนเทอมใหม่หรือล้างข้อมูลตามโหมดที่เลือก
+            if (mode === 'new_term') {
+                const newExamType = document.getElementById('tm-new-exam-type')?.value || 'กลางภาค';
+                const newTermSub = document.getElementById('tm-new-term-sub')?.value.trim();
+                const clearMode = document.getElementById('tm-new-term-clear-mode')?.value || 'clear_subjects';
+
+                state.settings.examType = newExamType;
+                if (newTermSub) state.settings.termSubtitle = newTermSub;
+                state.isSchedulePublished = false;
+
+                if (clearMode === 'clear_subjects') {
+                    state.subjects = [];
+                } else if (clearMode === 'clear_schedule_only') {
+                    state.subjects.forEach(s => { s.dayIndex = null; s.slotId = null; });
+                }
+
+                saveState('saveAll');
+                showToast(`เริ่มรอบสอบใหม่ "${getExamMainTitle()} ${getTermSubtitle()}" เรียบร้อยแล้ว`, 'success');
+            } else if (mode === 'clear_data') {
+                const scope = document.getElementById('tm-clear-scope')?.value || 'clear_schedule_only';
+                if (scope === 'clear_subjects') {
+                    state.subjects = [];
+                } else {
+                    state.subjects.forEach(s => { s.dayIndex = null; s.slotId = null; });
+                }
+                saveState('saveSubjects', { subjects: state.subjects });
+                showToast('บันทึกข้อมูลเดิมและล้างข้อมูลเรียบร้อยแล้ว', 'success');
+            } else {
+                showToast(`บันทึกโฟลเดอร์ "${record.folderName}" เรียบร้อยแล้ว`, 'success');
+            }
+
+            closeTermArchiveModal();
+            render();
+        }
+
+        function downloadArchivedFolderZip(archiveId) {
+            const arch = (state.archives || []).find(a => a.id === archiveId);
+            if (!arch) return;
+            exportArchiveFolderZip(arch);
+        }
+
+        function confirmRestoreArchive(archiveId) {
+            const arch = (state.archives || []).find(a => a.id === archiveId);
+            if (!arch || !arch.snapshot) {
+                showToast('ไม่พบข้อมูลสำรองในโฟลเดอร์นี้', 'error');
+                return;
+            }
+            openConfirmModal(
+                'กู้คืนข้อมูลจากโฟลเดอร์เทอม',
+                `ต้องการกู้คืนข้อมูลทั้งหมดจากโฟลเดอร์ "${arch.folderName}" กลับมาใช้งานในระบบปัจจุบันใช่หรือไม่? (ข้อมูลปัจจุบันที่ยังไม่บันทึกจะถูกแทนที่)`,
+                () => {
+                    const snap = arch.snapshot;
+                    const keepLogo = state.settings.logoDataUrl;
+                    state.settings = ensureSettingsIntegrity(snap.settings);
+                    if (!state.settings.logoDataUrl && keepLogo) state.settings.logoDataUrl = keepLogo;
+                    if (Array.isArray(snap.subjects)) state.subjects = JSON.parse(JSON.stringify(snap.subjects));
+                    if (Array.isArray(snap.users) && snap.users.length > 0) state.users = JSON.parse(JSON.stringify(snap.users));
+                    if (typeof snap.isSchedulePublished === 'boolean') state.isSchedulePublished = snap.isSchedulePublished;
+                    if (!state.settings.gradeGroups.some(g => g.id === state.selectedAdminGrade)) {
+                        state.selectedAdminGrade = state.settings.gradeGroups[0].id;
+                    }
+                    saveState('saveAll');
+                    showToast(`กู้คืนข้อมูลจากโฟลเดอร์ "${arch.folderName}" เรียบร้อยแล้ว`, 'success');
+                    render();
+                }
+            );
+        }
+
+        function confirmDeleteArchive(archiveId) {
+            const arch = (state.archives || []).find(a => a.id === archiveId);
+            if (!arch) return;
+            openConfirmModal(
+                'ลบโฟลเดอร์คลังข้อมูลเทอม',
+                `ต้องการลบโฟลเดอร์ "${arch.folderName}" ออกจากคลังใช่หรือไม่?`,
+                () => {
+                    state.archives = state.archives.filter(a => a.id !== archiveId);
+                    saveState('deleteArchive', { archiveId });
+                    showToast(`ลบโฟลเดอร์ "${arch.folderName}" เรียบร้อยแล้ว`, 'info');
+                    render();
+                }
+            );
+        }
+
+        function importBackupJsonFile(event) {
+            const inputEl = event.target;
+            const file = inputEl.files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const parsed = JSON.parse(e.target.result || '{}');
+                    if (!parsed.settings || !Array.isArray(parsed.subjects)) {
+                        throw new Error('Invalid backup format');
+                    }
+                    openConfirmModal(
+                        'ยืนยันนำเข้าไฟล์สำรอง (.JSON)',
+                        `พบข้อมูล "${parsed.settings.examType || ''} ${parsed.settings.termSubtitle || ''}" (${parsed.subjects.length} รายวิชา) ต้องการนำเข้ามาแทนที่ข้อมูลปัจจุบันใช่หรือไม่?`,
+                        () => {
+                            state.settings = ensureSettingsIntegrity(parsed.settings);
+                            state.subjects = parsed.subjects;
+                            if (Array.isArray(parsed.users) && parsed.users.length > 0) state.users = parsed.users;
+                            if (typeof parsed.isSchedulePublished === 'boolean') state.isSchedulePublished = parsed.isSchedulePublished;
+                            saveState('saveAll');
+                            showToast('นำเข้าข้อมูลจากไฟล์สำรองเรียบร้อยแล้ว', 'success');
+                            render();
+                        }
+                    );
+                } catch (err) {
+                    showToast('ไฟล์ JSON ไม่ถูกต้องหรือไม่ใช่ไฟล์สำรองของระบบนี้', 'error');
+                } finally {
+                    inputEl.value = '';
+                }
+            };
+            reader.readAsText(file, 'UTF-8');
         }
 
         function removeLogo() {
@@ -3455,13 +5201,14 @@
         function confirmResetSystemData() {
             openConfirmModal(
                 'รีเซ็ตข้อมูลระบบทั้งหมด',
-                'ต้องการคืนค่ารายวิชา บัญชีผู้ใช้ และตั้งค่าระบบกลับเป็นค่าเริ่มต้นใช่หรือไม่? (ข้อมูลที่แก้ไขไว้จะหายไป)',
+                'แนะนำให้กด "บันทึก & ส่งออกโฟลเดอร์เทอมนี้ (.ZIP)" ก่อนรีเซ็ต! ต้องการคืนค่ารายวิชา บัญชีผู้ใช้ และตั้งค่าระบบกลับเป็นค่าเริ่มต้นใช่หรือไม่?',
                 () => {
                     try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
                     state.settings = createDefaultSettings();
                     state.users = JSON.parse(JSON.stringify(INITIAL_USERS));
                     state.subjects = JSON.parse(JSON.stringify(INITIAL_SUBJECTS));
                     state.isSchedulePublished = true;
+                    state.selectedAdminGrade = state.settings.gradeGroups[0].id;
                     applyTheme();
                     saveState('saveAll');
                     showToast('รีเซ็ตข้อมูลกลับเป็นค่าเริ่มต้นเรียบร้อยแล้ว', 'success');
