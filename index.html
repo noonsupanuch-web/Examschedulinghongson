@@ -828,6 +828,10 @@
             exportHandoverGrade: 'm1',
             exportHandoverRoom: 'all',
             exportTeacherNamesCache: [],
+            auditStatusFilter: 'all', // 'all' | 'not_submitted' | 'submitted'
+            auditExamModeFilter: 'all', // 'all' | 'in_schedule' | 'outside'
+            auditDeptFilter: 'all',
+            auditSearch: '',
             userFilterDept: 'all',
             confirmCallback: null,
             modalSubjectId: null,
@@ -1315,6 +1319,128 @@
             return baseName;
         }
 
+        function isSubjectOutsideSchedule(sub) {
+            return Boolean(sub && sub.examMode === 'outside');
+        }
+
+        function normalizePersonName(name) {
+            return String(name || '').replace(/\s+/g, ' ').trim();
+        }
+
+        function buildTeacherSubmissionAuditData(subjectsSource = state.subjects, usersSource = state.users) {
+            const teacherUsers = (usersSource || []).filter(u => u.role === 'teacher');
+            const nameToUser = new Map();
+            teacherUsers.forEach(u => {
+                nameToUser.set(normalizePersonName(u.name), u);
+            });
+
+            const submissionsByNormName = new Map();
+            (subjectsSource || []).forEach(sub => {
+                const grade = getGradeObj(sub.gradeId);
+                const days = getDaysForGrade(sub.gradeId);
+                const isOutside = isSubjectOutsideSchedule(sub);
+                const isScheduled = !isOutside && sub.dayIndex !== null && sub.slotId !== null;
+                const dayText = isScheduled ? (days[sub.dayIndex] || '-') : '';
+                const timeText = isScheduled ? getSlotLabel(sub.slotId, sub.duration, sub.gradeId) : '';
+
+                (sub.teachers || []).forEach(t => {
+                    const norm = normalizePersonName(t.name);
+                    if (!norm) return;
+                    if (!submissionsByNormName.has(norm)) {
+                        submissionsByNormName.set(norm, {
+                            rawName: t.name.trim(),
+                            department: t.department || getUserDepartmentByName(t.name) || 'ไม่ระบุกลุ่มสาระ',
+                            items: []
+                        });
+                    }
+                    submissionsByNormName.get(norm).items.push({
+                        subjectId: sub.id,
+                        code: sub.code,
+                        name: getSubjectDisplayName(sub),
+                        gradeId: sub.gradeId,
+                        gradeShort: grade.short,
+                        gradeName: grade.name,
+                        duration: sub.duration,
+                        rooms: t.rooms || '',
+                        examMode: isOutside ? 'outside' : 'in_schedule',
+                        isScheduled,
+                        dayText,
+                        timeText
+                    });
+                });
+            });
+
+            const teacherRecords = [];
+            const seenNormNames = new Set();
+
+            // 1. ครูทั้งหมดที่มีบัญชีในระบบ
+            teacherUsers.forEach(u => {
+                const norm = normalizePersonName(u.name);
+                seenNormNames.add(norm);
+                const subEntry = submissionsByNormName.get(norm);
+                const items = subEntry ? subEntry.items : [];
+                const inScheduleItems = items.filter(it => it.examMode === 'in_schedule');
+                const outsideItems = items.filter(it => it.examMode === 'outside');
+
+                teacherRecords.push({
+                    id: u.id,
+                    username: u.username,
+                    name: u.name,
+                    department: u.department || 'ไม่ระบุกลุ่มสาระ',
+                    hasAccount: true,
+                    submitted: items.length > 0,
+                    items,
+                    inScheduleCount: inScheduleItems.length,
+                    outsideCount: outsideItems.length
+                });
+            });
+
+            // 2. กรณีมีชื่อครูในรายการสอบที่ไม่ได้ผูกตรงกับบัญชี role='teacher' (เช่น แอดมินกรอกแทน หรือชื่อสะกดต่างกัน)
+            submissionsByNormName.forEach((entry, norm) => {
+                if (seenNormNames.has(norm)) return;
+                const matchedAdmin = (usersSource || []).find(u => normalizePersonName(u.name) === norm);
+                const inScheduleItems = entry.items.filter(it => it.examMode === 'in_schedule');
+                const outsideItems = entry.items.filter(it => it.examMode === 'outside');
+                teacherRecords.push({
+                    id: matchedAdmin ? matchedAdmin.id : 'ext_' + norm,
+                    username: matchedAdmin ? matchedAdmin.username : '(กรอกชื่อเอง)',
+                    name: entry.rawName,
+                    department: entry.department,
+                    hasAccount: Boolean(matchedAdmin),
+                    submitted: true,
+                    items: entry.items,
+                    inScheduleCount: inScheduleItems.length,
+                    outsideCount: outsideItems.length
+                });
+            });
+
+            teacherRecords.sort((a, b) => {
+                const deptCmp = (a.department || '').localeCompare(b.department || '', 'th');
+                if (deptCmp !== 0) return deptCmp;
+                return a.name.localeCompare(b.name, 'th');
+            });
+
+            const totalTeachers = teacherUsers.length;
+            const submittedTeachersCount = teacherRecords.filter(r => r.hasAccount && (usersSource || []).some(u => u.id === r.id && u.role === 'teacher') && r.submitted).length;
+            const notSubmittedTeachersCount = Math.max(0, totalTeachers - submittedTeachersCount);
+
+            const inScheduleSubjects = (subjectsSource || []).filter(s => !isSubjectOutsideSchedule(s));
+            const outsideSubjects = (subjectsSource || []).filter(s => isSubjectOutsideSchedule(s));
+            const placedInScheduleCount = inScheduleSubjects.filter(s => s.dayIndex !== null && s.slotId !== null).length;
+            const waitingInScheduleCount = inScheduleSubjects.length - placedInScheduleCount;
+
+            return {
+                teacherRecords,
+                totalTeachers,
+                submittedTeachersCount,
+                notSubmittedTeachersCount,
+                inScheduleSubjects,
+                outsideSubjects,
+                placedInScheduleCount,
+                waitingInScheduleCount
+            };
+        }
+
         function expandThaiRooms(roomStr, gradeObj = null) {
             if (!roomStr) return [];
             const cleaned = String(roomStr)
@@ -1671,16 +1797,20 @@
 
             const rowsHtml = filteredSubjects.map(sub => {
                 const grade = getGradeObj(sub.gradeId);
-                const isScheduled = sub.dayIndex !== null && sub.slotId !== null;
+                const isOutside = isSubjectOutsideSchedule(sub);
+                const isScheduled = !isOutside && sub.dayIndex !== null && sub.slotId !== null;
                 const days = getDaysForGrade(sub.gradeId);
-                const statusBadge = isScheduled
-                    ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-700"><i class="fas fa-check-circle"></i> ${escapeHtml(days[sub.dayIndex] || '')} (${escapeHtml(getSlotLabel(sub.slotId, sub.duration, sub.gradeId))})</span>`
-                    : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-700"><i class="fas fa-clock"></i> รอจัดตาราง</span>`;
+                const statusBadge = isOutside
+                    ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-purple-100 text-purple-800 border border-purple-200"><i class="fas fa-chalkboard"></i> สอบนอกตาราง (ไม่ลงตารางสอบกลาง)</span>`
+                    : (isScheduled
+                        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-700"><i class="fas fa-check-circle"></i> สอบในตาราง: ${escapeHtml(days[sub.dayIndex] || '')} (${escapeHtml(getSlotLabel(sub.slotId, sub.duration, sub.gradeId))})</span>`
+                        : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-700"><i class="fas fa-clock"></i> สอบในตาราง (รอจัดเวลา)</span>`);
 
                 const mergedBadge = sub.teachers.length > 1
                     ? `<span class="ml-1 inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-100 text-indigo-700">สอบรวม ${sub.teachers.length} คน</span>`
                     : '';
 
+                const canToggleMode = isAdmin || sub.teachers.some(t => normalizePersonName(t.name) === normalizePersonName(state.currentUser.name));
                 const teacherListHtml = sub.teachers.map((t, tIdx) => {
                     const tDept = t.department || getUserDepartmentByName(t.name);
                     return `
@@ -1720,18 +1850,53 @@
                         <td class="p-3 whitespace-nowrap text-xs font-semibold text-gray-600">${sub.duration} นาที</td>
                         <td class="p-3 min-w-[240px]">${teacherListHtml}</td>
                         <td class="p-3 text-right whitespace-nowrap">
-                            ${isAdmin ? `
-                                <button type="button" onclick="confirmDeleteSubject('${sub.id}')" class="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-red-50 hover:bg-red-100 text-red-600 transition" title="ลบรายวิชานี้">
-                                    <i class="fas fa-trash-alt"></i>
-                                </button>
-                            ` : '<span class="text-xs text-gray-400">-</span>'}
+                            <div class="inline-flex items-center justify-end gap-1.5">
+                                ${canToggleMode ? `
+                                    <button type="button" onclick="toggleSubjectExamMode('${sub.id}')"
+                                        class="px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition ${isOutside ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'}"
+                                        title="สลับระหว่าง สอบในตาราง / สอบนอกตาราง">
+                                        <i class="fas fa-exchange-alt mr-1"></i>${isOutside ? 'เปลี่ยนเป็นในตาราง' : 'เปลี่ยนเป็นนอกตาราง'}
+                                    </button>
+                                ` : ''}
+                                ${isAdmin ? `
+                                    <button type="button" onclick="confirmDeleteSubject('${sub.id}')" class="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-red-50 hover:bg-red-100 text-red-600 transition" title="ลบรายวิชานี้">
+                                        <i class="fas fa-trash-alt"></i>
+                                    </button>
+                                ` : (!canToggleMode ? '<span class="text-xs text-gray-400">-</span>' : '')}
+                            </div>
                         </td>
                     </tr>
                 `;
             }).join('');
 
+            const auditSummary = isAdmin ? buildTeacherSubmissionAuditData() : null;
+            const adminAuditBannerHtml = isAdmin && auditSummary ? `
+                <div class="bg-gradient-to-r from-slate-800 to-slate-900 text-white rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                    <div class="flex items-start gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0 text-amber-300">
+                            <i class="fas fa-clipboard-check text-lg"></i>
+                        </div>
+                        <div>
+                            <div class="font-bold text-sm sm:text-base">สรุปสถานะการส่งรายวิชาสอบของครู (สำหรับแอดมิน)</div>
+                            <div class="text-xs text-white/85 mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                                <span><i class="fas fa-user-check text-emerald-400 mr-1"></i>ส่งข้อมูลแล้ว: <strong>${auditSummary.submittedTeachersCount}</strong> / ${auditSummary.totalTeachers} คน</span>
+                                <span><i class="fas fa-user-times text-rose-400 mr-1"></i>ยังไม่เข้ามากรอกเลย: <strong class="text-rose-300">${auditSummary.notSubmittedTeachersCount}</strong> คน</span>
+                                <span><i class="fas fa-calendar-check text-sky-300 mr-1"></i>สอบในตาราง: <strong>${auditSummary.inScheduleSubjects.length}</strong> วิชา</span>
+                                <span><i class="fas fa-chalkboard text-purple-300 mr-1"></i>สอบนอกตาราง: <strong>${auditSummary.outsideSubjects.length}</strong> วิชา</span>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" onclick="openTeacherAuditReport()"
+                        class="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-amber-400 hover:bg-amber-300 text-slate-950 shadow-sm transition flex items-center justify-center gap-1.5 flex-shrink-0">
+                        <i class="fas fa-file-alt"></i> ดูรายงานตรวจสอบ & ส่งออก
+                    </button>
+                </div>
+            ` : '';
+
             return `
                 <div class="space-y-5">
+                    ${adminAuditBannerHtml}
+
                     <!-- Entry Form Card -->
                     <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6">
                         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
@@ -1740,7 +1905,7 @@
                                     <i class="fas fa-edit theme-text mr-2"></i>แบบฟอร์มกรอกข้อมูลรายวิชาสอบ
                                 </h2>
                                 <p class="text-xs sm:text-sm text-gray-500 mt-1">
-                                    หากกรอก <strong>รหัสวิชาเดียวกัน</strong> ในระดับชั้นเดียวกัน ระบบจะนำชื่อครูไป <strong>สอบรวมกันโดยอัตโนมัติ</strong> (และสามารถระบุวิชาที่สอบเฉพาะห้องเดียวได้)
+                                    ระบุได้ว่าวิชานี้ <strong>สอบในตาราง</strong> หรือ <strong>สอบนอกตาราง</strong> และหากกรอกรหัสวิชาเดียวกันในชั้นเดียวกัน ระบบจะรวมครูสอบพร้อมกันอัตโนมัติ
                                 </p>
                             </div>
                             <div class="flex flex-wrap items-center gap-2 self-start sm:self-auto">
@@ -1787,6 +1952,13 @@
                                 </select>
                             </div>
                             <div class="lg:col-span-2">
+                                <label class="block text-xs font-bold text-gray-700 mb-1">รูปแบบการจัดสอบ *</label>
+                                <select id="f-exam-mode" required class="w-full border border-gray-300 rounded-xl p-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                                    <option value="in_schedule" selected>สอบในตาราง (จัดลงตารางสอบกลาง)</option>
+                                    <option value="outside">สอบนอกตาราง (สอบปฏิบัติ / สอบในคาบเรียน)</option>
+                                </select>
+                            </div>
+                            <div class="lg:col-span-2">
                                 <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อครูผู้สอน *</label>
                                 <input type="text" id="f-teacher" required value="${escapeHtml(defaultTeacherName)}" placeholder="เช่น ครูสมชาย ใจดี"
                                     class="w-full border border-gray-300 rounded-xl p-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
@@ -1798,14 +1970,14 @@
                                     <option value="specific">วิชาสอบเพิ่มเฉพาะห้องเดียว / บางห้อง</option>
                                 </select>
                             </div>
-                            <div>
+                            <div class="lg:col-span-4">
                                 <label id="f-rooms-label" class="block text-xs font-bold text-gray-700 mb-1">ห้องที่สอน (ถ้ามี)</label>
                                 <input type="text" id="f-rooms" placeholder="เช่น ม.1/1-1/3"
                                     class="w-full border border-gray-300 rounded-xl p-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
                             </div>
-                            <div class="flex items-end">
+                            <div class="lg:col-span-2 flex items-end">
                                 <button type="submit" class="w-full theme-btn py-2.5 px-4 rounded-xl text-sm font-bold shadow-sm transition flex items-center justify-center gap-1.5">
-                                    <i class="fas fa-plus-circle"></i> บันทึกข้อมูล
+                                    <i class="fas fa-plus-circle"></i> บันทึกข้อมูลรายวิชา
                                 </button>
                             </div>
                         </form>
@@ -1905,6 +2077,7 @@
             const code = document.getElementById('f-code').value.trim();
             const name = document.getElementById('f-name').value.trim();
             const duration = parseInt(document.getElementById('f-duration').value, 10) || 60;
+            const examMode = document.getElementById('f-exam-mode')?.value === 'outside' ? 'outside' : 'in_schedule';
             const teacherName = document.getElementById('f-teacher').value.trim();
             const roomScope = document.getElementById('f-room-scope')?.value || 'all';
             const rooms = document.getElementById('f-rooms').value.trim();
@@ -1938,11 +2111,13 @@
                     duration,
                     isRoomSpecific,
                     targetRooms: isRoomSpecific ? rooms : '',
+                    examMode,
                     teachers: [teacherObj],
                     dayIndex: null,
                     slotId: null
                 });
-                showToast(`เพิ่มรายวิชา ${code} ${name} เรียบร้อยแล้ว`, 'success');
+                const modeText = examMode === 'outside' ? ' (สอบนอกตาราง)' : ' (สอบในตาราง)';
+                showToast(`เพิ่มรายวิชา ${code} ${name}${modeText} เรียบร้อยแล้ว`, 'success');
             }
 
             // ใช้โหมด addSubject แบบ Atomic เพื่อให้ครูหลายคนส่งข้อมูลพร้อมกันได้โดยไม่ทับกัน
@@ -1955,10 +2130,38 @@
                     duration,
                     isRoomSpecific,
                     targetRooms: isRoomSpecific ? rooms : '',
+                    examMode,
                     teacher: teacherObj
                 }
             });
             render();
+        }
+
+        function toggleSubjectExamMode(subjectId) {
+            const sub = state.subjects.find(s => s.id === subjectId);
+            if (!sub) return;
+            const nextOutside = !isSubjectOutsideSchedule(sub);
+            sub.examMode = nextOutside ? 'outside' : 'in_schedule';
+            if (nextOutside) {
+                sub.dayIndex = null;
+                sub.slotId = null;
+            }
+            saveState('saveSubjects', { subjects: state.subjects });
+            showToast(
+                nextOutside
+                    ? `เปลี่ยนวิชา ${sub.code} เป็น "สอบนอกตาราง" แล้ว (นำออกจากตารางสอบกลาง)`
+                    : `เปลี่ยนวิชา ${sub.code} เป็น "สอบในตาราง" แล้ว (พร้อมจัดลงตารางสอบกลาง)`,
+                'success'
+            );
+            render();
+        }
+
+        function openTeacherAuditReport() {
+            state.currentView = 'export';
+            state.exportMode = 'audit';
+            state.mobileMenuOpen = false;
+            render();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
         function removeTeacherFromSubject(subjectId, teacherIdx) {
@@ -2006,11 +2209,13 @@
             const selectedGrade = getGradeObj(state.selectedAdminGrade);
             const days = getDaysForGrade(selectedGrade.id);
             const timeSlots = getSlotsForGrade(selectedGrade.id);
-            const gradeSubjects = state.subjects.filter(s => s.gradeId === selectedGrade.id);
+            const allGradeSubjects = state.subjects.filter(s => s.gradeId === selectedGrade.id);
+            const gradeSubjects = allGradeSubjects.filter(s => !isSubjectOutsideSchedule(s));
+            const outsideGradeSubjects = allGradeSubjects.filter(s => isSubjectOutsideSchedule(s));
             const unscheduled = gradeSubjects.filter(s => s.dayIndex === null || s.slotId === null);
 
             const makeGradeBtn = (g) => {
-                const unCount = state.subjects.filter(s => s.gradeId === g.id && (s.dayIndex === null || s.slotId === null)).length;
+                const unCount = state.subjects.filter(s => s.gradeId === g.id && !isSubjectOutsideSchedule(s) && (s.dayIndex === null || s.slotId === null)).length;
                 const hasCustom = g.useCustomDays || g.useCustomSlots;
                 return `
                     <button type="button" onclick="state.selectedAdminGrade='${g.id}'; render();"
@@ -2148,6 +2353,10 @@
                                 </p>
                             </div>
                             <div class="flex flex-wrap gap-2">
+                                <button type="button" onclick="openTeacherAuditReport()"
+                                    class="bg-slate-800 hover:bg-slate-900 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-1.5">
+                                    <i class="fas fa-clipboard-check text-amber-300"></i> เช็คสถานะครูส่งข้อสอบ
+                                </button>
                                 <button type="button" onclick="openGradeConfigModal('${selectedGrade.id}')"
                                     class="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5">
                                     <i class="fas fa-sliders-h"></i> ปรับวัน/เวลาสอบเฉพาะชั้นนี้
@@ -2196,13 +2405,35 @@
                             ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDropOnUnscheduled(event)">
                             <div class="flex items-center justify-between">
                                 <h3 class="font-bold text-sm text-gray-800">
-                                    <i class="fas fa-inbox text-amber-500 mr-1.5"></i>วิชารอจัดตาราง
+                                    <i class="fas fa-inbox text-amber-500 mr-1.5"></i>วิชารอจัดตาราง (ในตาราง)
                                 </h3>
                                 <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800">${unscheduled.length}</span>
                             </div>
-                            <div class="space-y-2.5 max-h-[600px] overflow-y-auto pr-0.5">
+                            <div class="space-y-2.5 max-h-[520px] overflow-y-auto pr-0.5">
                                 ${unscheduledHtml}
                             </div>
+                            ${outsideGradeSubjects.length > 0 ? `
+                                <div class="pt-3 border-t border-gray-100 space-y-2">
+                                    <div class="flex items-center justify-between text-xs font-bold text-purple-800">
+                                        <span><i class="fas fa-chalkboard mr-1"></i>วิชาสอบนอกตาราง (ชั้นนี้)</span>
+                                        <span class="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800">${outsideGradeSubjects.length}</span>
+                                    </div>
+                                    <div class="space-y-1.5 max-h-[220px] overflow-y-auto">
+                                        ${outsideGradeSubjects.map(sub => `
+                                            <div class="p-2.5 rounded-xl bg-purple-50/70 border border-purple-200 text-xs">
+                                                <div class="flex items-center justify-between gap-1">
+                                                    <span class="font-bold text-purple-900">${escapeHtml(sub.code)}</span>
+                                                    <button type="button" onclick="toggleSubjectExamMode('${sub.id}')" class="text-[10px] font-bold text-emerald-700 hover:underline">
+                                                        ย้ายเข้าในตาราง
+                                                    </button>
+                                                </div>
+                                                <div class="text-gray-800 font-medium mt-0.5">${escapeHtml(getSubjectDisplayName(sub))}</div>
+                                                <div class="text-[11px] text-gray-500 mt-0.5 truncate">${escapeHtml(sub.teachers.map(t => t.name).join(', '))}</div>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            ` : ''}
                         </div>
 
                         <!-- Schedule Columns -->
@@ -2228,7 +2459,7 @@
             const grade = getGradeObj(gradeId);
             const days = getDaysForGrade(gradeId);
             const validSlots = getSlotsForGrade(gradeId).filter(s => s.period !== 'lunch');
-            const gradeSubjects = state.subjects.filter(s => s.gradeId === gradeId);
+            const gradeSubjects = state.subjects.filter(s => s.gradeId === gradeId && !isSubjectOutsideSchedule(s));
             const unscheduled = gradeSubjects.filter(s => s.dayIndex === null || s.slotId === null);
 
             if (unscheduled.length === 0) {
@@ -2604,6 +2835,10 @@
                         class="px-3.5 py-2 rounded-xl text-xs font-bold transition ${state.exportMode === 'handover' ? 'theme-btn shadow-sm' : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'}">
                         <i class="fas fa-file-signature mr-1.5"></i>4. ใบเซ็นรับ-ส่งข้อสอบแต่ละห้อง
                     </button>
+                    <button type="button" onclick="state.exportMode='audit'; render();"
+                        class="px-3.5 py-2 rounded-xl text-xs font-bold transition ${state.exportMode === 'audit' ? 'theme-btn shadow-sm' : 'bg-purple-50 text-purple-800 border border-purple-200 hover:bg-purple-100'}">
+                        <i class="fas fa-clipboard-check mr-1.5"></i>5. รายงานเช็คครูส่งข้อมูล (ใน/นอกตาราง & ยังไม่กรอก)
+                    </button>
                 </div>
             ` : `
                 <div class="flex flex-wrap gap-2 mt-4 pt-4 border-t border-gray-100">
@@ -2625,6 +2860,8 @@
                 contentHtml = renderTeacherExportView();
             } else if (state.exportMode === 'subject') {
                 contentHtml = renderSubjectExportView();
+            } else if (state.exportMode === 'audit' && isAdmin) {
+                contentHtml = renderTeacherAuditExportView();
             } else {
                 contentHtml = renderRoomHandoverExportView();
             }
@@ -2678,7 +2915,7 @@
             const sectionsHtml = targetGrades.map(grade => {
                 const days = getDaysForGrade(grade.id);
                 const timeSlots = getSlotsForGrade(grade.id);
-                const gradeSubjects = state.subjects.filter(s => s.gradeId === grade.id && s.dayIndex !== null && s.slotId !== null);
+                const gradeSubjects = state.subjects.filter(s => s.gradeId === grade.id && !isSubjectOutsideSchedule(s) && s.dayIndex !== null && s.slotId !== null);
                 const sectionId = `grade-sec-${grade.id}`;
 
                 const dayTablesHtml = days.map((dayLabel, dIdx) => {
@@ -2798,9 +3035,14 @@
                 const grade = getGradeObj(sub.gradeId);
                 const days = getDaysForGrade(sub.gradeId);
                 const slots = getSlotsForGrade(sub.gradeId);
-                const dayText = sub.dayIndex !== null ? (days[sub.dayIndex] || '-') : 'ยังไม่จัดวัน';
-                const timeText = sub.slotId ? getSlotLabel(sub.slotId, sub.duration, sub.gradeId) : 'ยังไม่จัดเวลา';
-                const slotOrder = slots.findIndex(s => s.id === sub.slotId);
+                const isOutside = isSubjectOutsideSchedule(sub);
+                const dayText = isOutside
+                    ? 'สอบนอกตาราง'
+                    : (sub.dayIndex !== null ? (days[sub.dayIndex] || '-') : 'ยังไม่จัดวัน');
+                const timeText = isOutside
+                    ? 'นอกตารางสอบกลาง'
+                    : (sub.slotId ? getSlotLabel(sub.slotId, sub.duration, sub.gradeId) : 'ยังไม่จัดเวลา');
+                const slotOrder = isOutside ? 98 : slots.findIndex(s => s.id === sub.slotId);
 
                 (sub.teachers || []).forEach(t => {
                     const tName = t.name.trim();
@@ -2810,14 +3052,15 @@
                         gradeName: grade.name,
                         gradeShort: grade.short,
                         dayText,
-                        dayIndex: sub.dayIndex === null ? 99 : sub.dayIndex,
+                        dayIndex: isOutside ? 98 : (sub.dayIndex === null ? 99 : sub.dayIndex),
                         timeText,
                         slotOrder: slotOrder === -1 ? 99 : slotOrder,
                         code: sub.code,
                         name: getSubjectDisplayName(sub),
                         duration: sub.duration,
                         rooms: t.rooms || '-',
-                        coTeachersCount: sub.teachers.length
+                        coTeachersCount: sub.teachers.length,
+                        isOutside
                     });
                 });
             });
@@ -2936,14 +3179,20 @@
             const rowsHtml = targetSubs.map(sub => {
                 const grade = getGradeObj(sub.gradeId);
                 const days = getDaysForGrade(sub.gradeId);
-                const dayText = sub.dayIndex !== null ? (days[sub.dayIndex] || '-') : 'ยังไม่จัดวัน';
-                const timeText = sub.slotId ? getSlotLabel(sub.slotId, sub.duration, sub.gradeId) : 'ยังไม่จัดเวลา';
+                const isOutside = isSubjectOutsideSchedule(sub);
+                const dayText = isOutside
+                    ? 'สอบนอกตาราง'
+                    : (sub.dayIndex !== null ? (days[sub.dayIndex] || '-') : 'ยังไม่จัดวัน');
+                const timeText = isOutside
+                    ? 'นอกตารางสอบกลาง'
+                    : (sub.slotId ? getSlotLabel(sub.slotId, sub.duration, sub.gradeId) : 'ยังไม่จัดเวลา');
 
                 return `
                     <tr>
                         <td class="border border-gray-800 p-2 text-center doc-bold whitespace-nowrap">${escapeHtml(sub.code)}</td>
                         <td class="border border-gray-800 p-2">${escapeHtml(getSubjectDisplayName(sub))}</td>
                         <td class="border border-gray-800 p-2 text-center whitespace-nowrap">${escapeHtml(grade.short)}</td>
+                        <td class="border border-gray-800 p-2 text-center whitespace-nowrap">${isOutside ? 'สอบนอกตาราง' : 'สอบในตาราง'}</td>
                         <td class="border border-gray-800 p-2 whitespace-nowrap">${escapeHtml(dayText)}</td>
                         <td class="border border-gray-800 p-2 text-center whitespace-nowrap">${escapeHtml(timeText)}</td>
                         <td class="border border-gray-800 p-2 text-center whitespace-nowrap">${sub.duration} นาที</td>
@@ -2980,6 +3229,7 @@
                                         <th class="border border-gray-800 p-2">รหัสวิชา</th>
                                         <th class="border border-gray-800 p-2">รายวิชา</th>
                                         <th class="border border-gray-800 p-2">ระดับชั้น</th>
+                                        <th class="border border-gray-800 p-2">รูปแบบการสอบ</th>
                                         <th class="border border-gray-800 p-2">วันสอบ</th>
                                         <th class="border border-gray-800 p-2">เวลาสอบ</th>
                                         <th class="border border-gray-800 p-2">ระยะเวลา</th>
@@ -2992,6 +3242,344 @@
                     </div>
                 </div>
             `;
+        }
+
+        function renderTeacherAuditExportView() {
+            const audit = buildTeacherSubmissionAuditData();
+            const allDepts = Array.from(new Set([
+                ...DEPARTMENTS,
+                ...audit.teacherRecords.map(r => r.department).filter(Boolean)
+            ]));
+
+            const deptOptions = `<option value="all">ทุกกลุ่มสาระการเรียนรู้</option>` +
+                allDepts.map(d => `<option value="${escapeHtml(d)}" ${state.auditDeptFilter === d ? 'selected' : ''}>${escapeHtml(d)}</option>`).join('');
+
+            const searchLower = (state.auditSearch || '').toLowerCase().trim();
+
+            const filteredTeacherRecords = audit.teacherRecords.filter(rec => {
+                if (state.auditStatusFilter === 'not_submitted' && rec.submitted) return false;
+                if (state.auditStatusFilter === 'submitted' && !rec.submitted) return false;
+                if (state.auditDeptFilter !== 'all' && rec.department !== state.auditDeptFilter) return false;
+
+                if (state.auditExamModeFilter === 'in_schedule' && rec.inScheduleCount === 0) return false;
+                if (state.auditExamModeFilter === 'outside' && rec.outsideCount === 0) return false;
+
+                if (searchLower) {
+                    const matchTeacher = rec.name.toLowerCase().includes(searchLower) ||
+                        rec.username.toLowerCase().includes(searchLower) ||
+                        rec.department.toLowerCase().includes(searchLower);
+                    const matchSub = rec.items.some(it =>
+                        it.code.toLowerCase().includes(searchLower) ||
+                        it.name.toLowerCase().includes(searchLower) ||
+                        it.gradeShort.toLowerCase().includes(searchLower)
+                    );
+                    if (!matchTeacher && !matchSub) return false;
+                }
+                return true;
+            });
+
+            const filteredSubjects = state.subjects.filter(sub => {
+                const isOutside = isSubjectOutsideSchedule(sub);
+                if (state.auditExamModeFilter === 'in_schedule' && isOutside) return false;
+                if (state.auditExamModeFilter === 'outside' && !isOutside) return false;
+
+                if (state.auditDeptFilter !== 'all') {
+                    const matchDept = (sub.teachers || []).some(t =>
+                        (t.department || getUserDepartmentByName(t.name) || 'ไม่ระบุกลุ่มสาระ') === state.auditDeptFilter
+                    );
+                    if (!matchDept) return false;
+                }
+
+                if (searchLower) {
+                    const matchSub = sub.code.toLowerCase().includes(searchLower) ||
+                        sub.name.toLowerCase().includes(searchLower) ||
+                        (sub.teachers || []).some(t => t.name.toLowerCase().includes(searchLower));
+                    if (!matchSub) return false;
+                }
+                return true;
+            });
+
+            const teacherRowsHtml = filteredTeacherRecords.map((rec, idx) => {
+                const visibleItems = rec.items.filter(it => {
+                    if (state.auditExamModeFilter === 'in_schedule') return it.examMode === 'in_schedule';
+                    if (state.auditExamModeFilter === 'outside') return it.examMode === 'outside';
+                    return true;
+                });
+
+                const statusHtml = rec.submitted
+                    ? `<span class="inline-block px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 doc-bold text-xs">ส่งแล้ว (${rec.items.length} วิชา)</span>`
+                    : `<span class="inline-block px-2 py-0.5 rounded bg-red-100 text-red-700 doc-bold text-xs">ยังไม่เข้ามากรอกเลย</span>`;
+
+                const subjectsDetailHtml = visibleItems.length > 0
+                    ? visibleItems.map(it => {
+                        const modeTag = it.examMode === 'outside'
+                            ? `<span class="font-bold text-purple-800">[สอบนอกตาราง]</span>`
+                            : (it.isScheduled
+                                ? `<span class="font-bold text-emerald-800">[สอบในตาราง: ${escapeHtml(it.dayText)} ${escapeHtml(it.timeText)}]</span>`
+                                : `<span class="font-bold text-amber-700">[สอบในตาราง: รอจัดเวลา]</span>`);
+                        return `
+                            <div class="py-0.5 border-b border-gray-200 last:border-0">
+                                <span class="doc-bold">${escapeHtml(it.gradeShort)}</span> •
+                                <span class="doc-bold">${escapeHtml(it.code)}</span> ${escapeHtml(it.name)}
+                                ${it.rooms ? `<span>(ห้อง ${escapeHtml(it.rooms)})</span>` : ''}
+                                — ${modeTag}
+                            </div>
+                        `;
+                    }).join('')
+                    : `<span class="text-red-600 italic">— ยังไม่มีรายการจัดสอบที่บันทึกในระบบ —</span>`;
+
+                return `
+                    <tr class="${rec.submitted ? '' : 'bg-red-50/40'}">
+                        <td class="border border-gray-800 p-2 text-center align-top">${idx + 1}</td>
+                        <td class="border border-gray-800 p-2 align-top">
+                            <div class="doc-bold">${escapeHtml(rec.name)}</div>
+                            <div class="text-xs text-gray-500">Username: ${escapeHtml(rec.username)}</div>
+                        </td>
+                        <td class="border border-gray-800 p-2 align-top">${escapeHtml(rec.department)}</td>
+                        <td class="border border-gray-800 p-2 text-center align-top whitespace-nowrap">${statusHtml}</td>
+                        <td class="border border-gray-800 p-2 text-center align-top whitespace-nowrap">${rec.inScheduleCount} วิชา</td>
+                        <td class="border border-gray-800 p-2 text-center align-top whitespace-nowrap">${rec.outsideCount} วิชา</td>
+                        <td class="border border-gray-800 p-2 align-top text-xs">${subjectsDetailHtml}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            const subjectRowsHtml = filteredSubjects.map((sub, idx) => {
+                const grade = getGradeObj(sub.gradeId);
+                const days = getDaysForGrade(sub.gradeId);
+                const isOutside = isSubjectOutsideSchedule(sub);
+                const isScheduled = !isOutside && sub.dayIndex !== null && sub.slotId !== null;
+                const scheduleText = isOutside
+                    ? 'สอบนอกตาราง (ไม่ลงตารางสอบกลาง)'
+                    : (isScheduled
+                        ? `${days[sub.dayIndex] || '-'} (${getSlotLabel(sub.slotId, sub.duration, sub.gradeId)})`
+                        : 'รอแอดมินจัดลงตาราง');
+
+                return `
+                    <tr>
+                        <td class="border border-gray-800 p-2 text-center">${idx + 1}</td>
+                        <td class="border border-gray-800 p-2 text-center whitespace-nowrap">${escapeHtml(grade.short)}</td>
+                        <td class="border border-gray-800 p-2 text-center doc-bold whitespace-nowrap">${escapeHtml(sub.code)}</td>
+                        <td class="border border-gray-800 p-2">${escapeHtml(getSubjectDisplayName(sub))}</td>
+                        <td class="border border-gray-800 p-2 text-center whitespace-nowrap doc-bold ${isOutside ? 'text-purple-800' : 'text-emerald-800'}">
+                            ${isOutside ? 'สอบนอกตาราง' : 'สอบในตาราง'}
+                        </td>
+                        <td class="border border-gray-800 p-2 whitespace-nowrap">${escapeHtml(scheduleText)}</td>
+                        <td class="border border-gray-800 p-2">${escapeHtml(formatTeachersDisplay(sub.teachers, true))}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            const submittedPct = audit.totalTeachers > 0
+                ? Math.round((audit.submittedTeachersCount / audit.totalTeachers) * 100)
+                : 0;
+
+            return `
+                <div class="space-y-5">
+                    <!-- Summary KPI Cards -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 no-print">
+                        <div class="bg-white rounded-2xl p-4 border border-gray-200 shadow-sm">
+                            <div class="text-xs font-bold text-gray-500">ครูผู้สอนทั้งหมดในระบบ</div>
+                            <div class="text-2xl font-bold text-gray-900 mt-1">${audit.totalTeachers} <span class="text-sm font-normal text-gray-500">คน</span></div>
+                            <div class="text-xs text-indigo-600 font-semibold mt-1">ความคืบหน้าการส่ง ${submittedPct}%</div>
+                        </div>
+                        <div class="bg-emerald-50/70 rounded-2xl p-4 border border-emerald-200 shadow-sm cursor-pointer hover:border-emerald-400 transition"
+                            onclick="state.auditStatusFilter = (state.auditStatusFilter === 'submitted' ? 'all' : 'submitted'); render();">
+                            <div class="text-xs font-bold text-emerald-800 flex items-center justify-between">
+                                <span>ครูที่ส่งข้อมูลแล้ว</span>
+                                <i class="fas fa-user-check"></i>
+                            </div>
+                            <div class="text-2xl font-bold text-emerald-900 mt-1">${audit.submittedTeachersCount} <span class="text-sm font-normal">คน</span></div>
+                            <div class="text-[11px] text-emerald-700 mt-1">คลิกเพื่อกรองเฉพาะครูที่ส่งแล้ว</div>
+                        </div>
+                        <div class="bg-red-50/80 rounded-2xl p-4 border border-red-200 shadow-sm cursor-pointer hover:border-red-400 transition"
+                            onclick="state.auditStatusFilter = (state.auditStatusFilter === 'not_submitted' ? 'all' : 'not_submitted'); render();">
+                            <div class="text-xs font-bold text-red-800 flex items-center justify-between">
+                                <span>ครูที่ยังไม่ได้เข้ามากรอกเลย</span>
+                                <i class="fas fa-user-times"></i>
+                            </div>
+                            <div class="text-2xl font-bold text-red-700 mt-1">${audit.notSubmittedTeachersCount} <span class="text-sm font-normal">คน</span></div>
+                            <div class="text-[11px] text-red-700 mt-1">คลิกเพื่อดูรายชื่อครูที่ยังไม่ส่ง</div>
+                        </div>
+                        <div class="bg-purple-50/70 rounded-2xl p-4 border border-purple-200 shadow-sm">
+                            <div class="text-xs font-bold text-purple-900">แยกรูปแบบรายวิชาสอบ</div>
+                            <div class="text-sm font-bold text-gray-900 mt-1.5">
+                                ในตาราง: <span class="text-emerald-700">${audit.inScheduleSubjects.length}</span> วิชา
+                                <span class="text-xs font-normal text-gray-500">(จัดแล้ว ${audit.placedInScheduleCount})</span>
+                            </div>
+                            <div class="text-sm font-bold text-purple-800 mt-0.5">
+                                นอกตาราง: <span>${audit.outsideSubjects.length}</span> วิชา
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Filter Toolbar -->
+                    <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 space-y-3 no-print">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-600 mb-1">สถานะการส่งของครู</label>
+                                <select onchange="state.auditStatusFilter=this.value; render();" class="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs sm:text-sm bg-white outline-none">
+                                    <option value="all" ${state.auditStatusFilter === 'all' ? 'selected' : ''}>แสดงครูทั้งหมด (${audit.teacherRecords.length})</option>
+                                    <option value="not_submitted" ${state.auditStatusFilter === 'not_submitted' ? 'selected' : ''}>เฉพาะครูที่ยังไม่ได้เข้ามากรอกเลย (${audit.notSubmittedTeachersCount})</option>
+                                    <option value="submitted" ${state.auditStatusFilter === 'submitted' ? 'selected' : ''}>เฉพาะครูที่ส่งข้อมูลแล้ว (${audit.submittedTeachersCount})</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-600 mb-1">รูปแบบการจัดสอบ</label>
+                                <select onchange="state.auditExamModeFilter=this.value; render();" class="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs sm:text-sm bg-white outline-none">
+                                    <option value="all" ${state.auditExamModeFilter === 'all' ? 'selected' : ''}>ทั้งสอบในตาราง และ สอบนอกตาราง</option>
+                                    <option value="in_schedule" ${state.auditExamModeFilter === 'in_schedule' ? 'selected' : ''}>เฉพาะสอบในตาราง (${audit.inScheduleSubjects.length} วิชา)</option>
+                                    <option value="outside" ${state.auditExamModeFilter === 'outside' ? 'selected' : ''}>เฉพาะสอบนอกตาราง (${audit.outsideSubjects.length} วิชา)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-600 mb-1">กลุ่มสาระการเรียนรู้</label>
+                                <select onchange="state.auditDeptFilter=this.value; render();" class="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs sm:text-sm bg-white outline-none">
+                                    ${deptOptions}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-600 mb-1">ค้นหาชื่อครู / รหัสวิชา / รายวิชา</label>
+                                <input type="text" value="${escapeHtml(state.auditSearch)}"
+                                    oninput="state.auditSearch=this.value; render();"
+                                    placeholder="พิมพ์ชื่อครู หรือ รหัสวิชา..."
+                                    class="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs sm:text-sm outline-none">
+                            </div>
+                        </div>
+
+                        <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-gray-100">
+                            <span class="text-xs text-gray-500">ส่งออกรายงานการตรวจสอบในรูปแบบไฟล์ต่างๆ:</span>
+                            <div class="flex flex-wrap gap-2">
+                                <button type="button" onclick="exportTeacherAuditCSV('teachers')"
+                                    class="px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition flex items-center gap-1.5">
+                                    <i class="fas fa-file-csv"></i> CSV สถานะครู (ส่งแล้ว / ยังไม่ส่ง)
+                                </button>
+                                <button type="button" onclick="exportTeacherAuditCSV('subjects')"
+                                    class="px-3.5 py-2 rounded-xl text-xs font-bold bg-teal-600 hover:bg-teal-700 text-white shadow-sm transition flex items-center gap-1.5">
+                                    <i class="fas fa-file-csv"></i> CSV รายวิชา (ในตาราง / นอกตาราง)
+                                </button>
+                                <button type="button" onclick="exportSectionAsWordDoc('audit-report-section', 'รายงานตรวจสอบการส่งข้อมูลจัดสอบ')"
+                                    class="px-3.5 py-2 rounded-xl text-xs font-bold bg-blue-700 hover:bg-blue-800 text-white shadow-sm transition flex items-center gap-1.5">
+                                    <i class="fas fa-file-word"></i> Word (.doc)
+                                </button>
+                                <button type="button" onclick="downloadSectionAsPNG('audit-report-section', 'รายงานตรวจสอบการส่งข้อมูลจัดสอบ')"
+                                    class="px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition flex items-center gap-1.5">
+                                    <i class="fas fa-image"></i> PNG
+                                </button>
+                                <button type="button" onclick="printSingleSection('audit-report-section')"
+                                    class="px-3.5 py-2 rounded-xl text-xs font-bold bg-gray-800 hover:bg-gray-900 text-white shadow-sm transition flex items-center gap-1.5">
+                                    <i class="fas fa-print"></i> PDF / พิมพ์
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Printable & Exportable Audit Report Document -->
+                    <div id="audit-report-section" class="printable-section bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6 print-card export-doc-area space-y-6">
+                        ${getScheduleHeaderHtml('รายงานตรวจสอบการส่งข้อมูลจัดสอบของครู (ส่งแล้ว / ยังไม่กรอก / ในตาราง / นอกตาราง)')}
+
+                        <!-- Part 1: Teacher Submission Status Table -->
+                        <div>
+                            <h3 class="text-sm sm:text-base doc-bold mb-2">
+                                1. สรุปรายชื่อครูผู้สอนและการส่งข้อมูลจัดสอบ (${filteredTeacherRecords.length} ท่าน)
+                            </h3>
+                            <div class="overflow-x-auto">
+                                <table class="w-full border-collapse border border-gray-800">
+                                    <thead>
+                                        <tr class="bg-gray-100 text-center">
+                                            <th class="border border-gray-800 p-2 w-[45px]">ที่</th>
+                                            <th class="border border-gray-800 p-2">ชื่อ - นามสกุลครู</th>
+                                            <th class="border border-gray-800 p-2">กลุ่มสาระการเรียนรู้</th>
+                                            <th class="border border-gray-800 p-2 w-[135px]">สถานะการส่ง</th>
+                                            <th class="border border-gray-800 p-2 w-[75px]">ในตาราง</th>
+                                            <th class="border border-gray-800 p-2 w-[75px]">นอกตาราง</th>
+                                            <th class="border border-gray-800 p-2">รายการวิชาที่ส่งจัดสอบ (ระบุในตาราง / นอกตาราง)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${teacherRowsHtml || `<tr><td colspan="7" class="border border-gray-800 p-6 text-center text-gray-500">ไม่พบข้อมูลครูตามเงื่อนไขที่กรอง</td></tr>`}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Part 2: Subject Breakdown (In-Schedule vs Outside-Schedule) -->
+                        <div>
+                            <h3 class="text-sm sm:text-base doc-bold mb-2">
+                                2. สรุปรายการวิชาสอบ แยกประเภทสอบในตาราง และ สอบนอกตาราง (${filteredSubjects.length} รายวิชา)
+                            </h3>
+                            <div class="overflow-x-auto">
+                                <table class="w-full border-collapse border border-gray-800">
+                                    <thead>
+                                        <tr class="bg-gray-100 text-center">
+                                            <th class="border border-gray-800 p-2 w-[45px]">ที่</th>
+                                            <th class="border border-gray-800 p-2 w-[75px]">ชั้น</th>
+                                            <th class="border border-gray-800 p-2 w-[90px]">รหัสวิชา</th>
+                                            <th class="border border-gray-800 p-2">รายวิชา</th>
+                                            <th class="border border-gray-800 p-2 w-[105px]">รูปแบบการสอบ</th>
+                                            <th class="border border-gray-800 p-2">กำหนดวัน / เวลาสอบ</th>
+                                            <th class="border border-gray-800 p-2">ครูผู้สอน</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${subjectRowsHtml || `<tr><td colspan="7" class="border border-gray-800 p-6 text-center text-gray-500">ไม่พบรายวิชาตามเงื่อนไขที่กรอง</td></tr>`}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function exportTeacherAuditCSV(part = 'teachers') {
+            const audit = buildTeacherSubmissionAuditData();
+            if (part === 'subjects') {
+                const headers = ['ลำดับ', 'ระดับชั้น', 'รหัสวิชา', 'รายวิชา', 'รูปแบบการสอบ', 'วันสอบ', 'เวลาสอบ', 'ระยะเวลา(นาที)', 'ครูผู้สอน'];
+                const rows = state.subjects.map((sub, idx) => {
+                    const grade = getGradeObj(sub.gradeId);
+                    const days = getDaysForGrade(sub.gradeId);
+                    const isOutside = isSubjectOutsideSchedule(sub);
+                    const isScheduled = !isOutside && sub.dayIndex !== null && sub.slotId !== null;
+                    return [
+                        idx + 1,
+                        grade.name,
+                        sub.code,
+                        getSubjectDisplayName(sub),
+                        isOutside ? 'สอบนอกตาราง' : 'สอบในตาราง',
+                        isOutside ? 'สอบนอกตาราง' : (isScheduled ? (days[sub.dayIndex] || '-') : 'ยังไม่จัดวัน'),
+                        isOutside ? 'นอกตารางสอบกลาง' : (isScheduled ? getSlotLabel(sub.slotId, sub.duration, sub.gradeId) : 'ยังไม่จัดเวลา'),
+                        sub.duration,
+                        formatTeachersDisplay(sub.teachers, true)
+                    ];
+                });
+                downloadCSV(`รายงานรายวิชา_ในตาราง_นอกตาราง_${state.settings.examType}.csv`, headers, rows);
+                return;
+            }
+
+            const headers = ['ลำดับ', 'Username', 'ชื่อ-นามสกุลครู', 'กลุ่มสาระการเรียนรู้', 'สถานะการส่งข้อมูล', 'จำนวนวิชาทั้งหมด', 'จำนวนสอบในตาราง', 'จำนวนสอบนอกตาราง', 'รายละเอียดวิชาที่ส่ง'];
+            const rows = audit.teacherRecords.map((rec, idx) => {
+                const detailStr = rec.items.length > 0
+                    ? rec.items.map(it => {
+                        const modeStr = it.examMode === 'outside'
+                            ? 'สอบนอกตาราง'
+                            : (it.isScheduled ? `สอบในตาราง: ${it.dayText} ${it.timeText}` : 'สอบในตาราง: รอจัดเวลา');
+                        return `${it.gradeShort} ${it.code} ${it.name} [${modeStr}]`;
+                    }).join(' | ')
+                    : 'ยังไม่ได้เข้ามากรอกข้อมูล';
+                return [
+                    idx + 1,
+                    rec.username,
+                    rec.name,
+                    rec.department,
+                    rec.submitted ? 'ส่งข้อมูลแล้ว' : 'ยังไม่เข้ามากรอกเลย',
+                    rec.items.length,
+                    rec.inScheduleCount,
+                    rec.outsideCount,
+                    detailStr
+                ];
+            });
+            downloadCSV(`รายงานการส่งข้อมูลจัดสอบของครู_${state.settings.examType}.csv`, headers, rows);
         }
 
         function updateGradeRoomsListFromInput() {
@@ -3356,6 +3944,10 @@
         }
 
         function exportCurrentModeCSV() {
+            if (state.exportMode === 'audit') {
+                exportTeacherAuditCSV('teachers');
+                return;
+            }
             if (state.exportMode === 'handover') {
                 const grade = getGradeObj(state.exportHandoverGrade);
                 const allRooms = getRoomsForGrade(grade.id);
@@ -3406,8 +3998,9 @@
                 if (state.exportMode === 'subject' && state.exportFilterSubject !== 'all' && sub.code !== state.exportFilterSubject) return;
                 const grade = getGradeObj(sub.gradeId);
                 const days = getDaysForGrade(sub.gradeId);
-                const dayText = sub.dayIndex !== null ? (days[sub.dayIndex] || '-') : 'ยังไม่จัดวัน';
-                const timeText = sub.slotId ? getSlotLabel(sub.slotId, sub.duration, sub.gradeId) : 'ยังไม่จัดเวลา';
+                const isOutside = isSubjectOutsideSchedule(sub);
+                const dayText = isOutside ? 'สอบนอกตาราง' : (sub.dayIndex !== null ? (days[sub.dayIndex] || '-') : 'ยังไม่จัดวัน');
+                const timeText = isOutside ? 'นอกตารางสอบกลาง' : (sub.slotId ? getSlotLabel(sub.slotId, sub.duration, sub.gradeId) : 'ยังไม่จัดเวลา');
                 rows.push([grade.name, dayText, timeText, sub.code, getSubjectDisplayName(sub), sub.duration, formatTeachersDisplay(sub.teachers)]);
             });
             downloadCSV(`ตารางสอบ${state.settings.examType}.csv`, headers, rows);
@@ -4539,21 +5132,25 @@
                 const days = (g.useCustomDays && g.customDays.length > 0) ? g.customDays : (g.level === 'upper' ? settings.upperDays : settings.lowerDays);
                 const slots = (g.useCustomSlots && g.customSlots.length > 0) ? g.customSlots : settings.defaultTimeSlots;
                 const slot = slots.find(s => s.id === sub.slotId);
-                const dayText = sub.dayIndex !== null ? (days[sub.dayIndex] || '-') : 'ยังไม่จัดวัน';
-                const timeText = slot
-                    ? ((Number(sub.duration) > 0 && slot.startMin) ? `${formatMinutesToTime(slot.startMin)}-${formatMinutesToTime(slot.startMin + Number(sub.duration))} น.` : slot.label)
-                    : 'ยังไม่จัดเวลา';
+                const isOutside = isSubjectOutsideSchedule(sub);
+                const dayText = isOutside ? 'สอบนอกตาราง' : (sub.dayIndex !== null ? (days[sub.dayIndex] || '-') : 'ยังไม่จัดวัน');
+                const timeText = isOutside
+                    ? 'นอกตารางสอบกลาง'
+                    : (slot
+                        ? ((Number(sub.duration) > 0 && slot.startMin) ? `${formatMinutesToTime(slot.startMin)}-${formatMinutesToTime(slot.startMin + Number(sub.duration))} น.` : slot.label)
+                        : 'ยังไม่จัดเวลา');
                 const tReadable = formatTeachersDisplay(sub.teachers);
                 const displaySubName = getSubjectDisplayName(sub);
+                const modeLabel = isOutside ? 'สอบนอกตาราง' : 'สอบในตาราง';
 
-                gradeCsvRows.push([g.name, dayText, timeText, sub.code, displaySubName, sub.duration, tReadable]);
-                subjectCsvRows.push([sub.code, displaySubName, g.short, dayText, timeText, sub.duration, formatTeachersDisplay(sub.teachers, true)]);
+                gradeCsvRows.push([g.name, dayText, timeText, sub.code, displaySubName, modeLabel, sub.duration, tReadable]);
+                subjectCsvRows.push([sub.code, displaySubName, g.short, modeLabel, dayText, timeText, sub.duration, formatTeachersDisplay(sub.teachers, true)]);
 
                 (sub.teachers || []).forEach(t => {
                     const tName = (t.name || '').trim();
                     if (!tName) return;
                     if (!teacherRowsMap.has(tName)) teacherRowsMap.set(tName, []);
-                    teacherRowsMap.get(tName).push([tName, t.department || '', dayText, timeText, g.name, sub.code, displaySubName, sub.duration, t.rooms || '-']);
+                    teacherRowsMap.get(tName).push([tName, t.department || '', modeLabel, dayText, timeText, g.name, sub.code, displaySubName, sub.duration, t.rooms || '-']);
                 });
             });
 
@@ -4601,23 +5198,35 @@
                 const root = zip.folder(safeFolder);
                 const perGradeDir = root.folder('ตารางสอบรายระดับชั้น_Word');
 
+                grades.forEach(g => {
+                    const gradeDocHtml = buildGradeHtmlForSnapshot(g, snapshot);
+                    perGradeDir.file(`ตารางสอบ_${sanitizeFilename(g.short)}.doc`, '\uFEFF' + buildWordDocumentHtml(gradeDocHtml));
+                });
+
                 root.file('01_ตารางสอบรวมทุกระดับชั้น.doc', '\uFEFF' + buildWordDocumentHtml(allGradesWordBody));
-                root.file('02_ตารางสอบแยกตามระดับชั้น.csv', buildCsvString(['ระดับชั้น', 'วันสอบ', 'เวลาสอบ', 'รหัสวิชา', 'รายวิชา', 'ระยะเวลา(นาที)', 'ครูผู้สอน'], gradeCsvRows));
-                root.file('03_ตารางสอบแยกตามครูผู้สอน.csv', buildCsvString(['ครูผู้สอน', 'กลุ่มสาระ', 'วันสอบ', 'เวลาสอบ', 'ระดับชั้น', 'รหัสวิชา', 'รายวิชา', 'ระยะเวลา(นาที)', 'ห้องที่สอน'], teacherCsvRows));
-                root.file('04_ตารางสอบแยกตามรายวิชา.csv', buildCsvString(['รหัสวิชา', 'รายวิชา', 'ระดับชั้น', 'วันสอบ', 'เวลาสอบ', 'ระยะเวลา(นาที)', 'ครูผู้สอน'], subjectCsvRows));
+                root.file('02_ตารางสอบแยกตามระดับชั้น.csv', buildCsvString(['ระดับชั้น', 'วันสอบ', 'เวลาสอบ', 'รหัสวิชา', 'รายวิชา', 'รูปแบบการสอบ', 'ระยะเวลา(นาที)', 'ครูผู้สอน'], gradeCsvRows));
+                root.file('03_ตารางสอบแยกตามครูผู้สอน.csv', buildCsvString(['ครูผู้สอน', 'กลุ่มสาระ', 'รูปแบบการสอบ', 'วันสอบ', 'เวลาสอบ', 'ระดับชั้น', 'รหัสวิชา', 'รายวิชา', 'ระยะเวลา(นาที)', 'ห้องที่สอน'], teacherCsvRows));
+                root.file('04_ตารางสอบแยกตามรายวิชา.csv', buildCsvString(['รหัสวิชา', 'รายวิชา', 'ระดับชั้น', 'รูปแบบการสอบ', 'วันสอบ', 'เวลาสอบ', 'ระยะเวลา(นาที)', 'ครูผู้สอน'], subjectCsvRows));
                 root.file('05_รายชื่อและรหัสผ่านผู้ใช้.csv', buildCsvString(['username', 'password', 'name', 'department', 'role'], userCsvRows));
                 root.file('06_ข้อมูลสำรองเต็มรูปแบบ_Backup.json', JSON.stringify(snapshot, null, 2));
                 if (allHandoverWordBody) {
                     root.file('07_ใบเซ็นรับส่งข้อสอบแต่ละห้อง.doc', '\uFEFF' + buildWordDocumentHtml(allHandoverWordBody));
                 }
+                const auditData = buildTeacherSubmissionAuditData(subjects, users);
+                const auditCsvRows = auditData.teacherRecords.map((rec, idx) => [
+                    idx + 1,
+                    rec.username,
+                    rec.name,
+                    rec.department,
+                    rec.submitted ? 'ส่งข้อมูลแล้ว' : 'ยังไม่เข้ามากรอกเลย',
+                    rec.inScheduleCount,
+                    rec.outsideCount,
+                    rec.items.map(it => `${it.gradeShort} ${it.code} ${it.name} [${it.examMode === 'outside' ? 'สอบนอกตาราง' : 'สอบในตาราง'}]`).join(' | ') || 'ยังไม่กรอก'
+                ]);
+                root.file('08_รายงานการส่งข้อมูลจัดสอบของครู.csv', buildCsvString(['ลำดับ', 'Username', 'ชื่อครู', 'กลุ่มสาระ', 'สถานะ', 'สอบในตาราง(วิชา)', 'สอบนอกตาราง(วิชา)', 'รายการวิชาที่ส่ง'], auditCsvRows));
 
-                grades.forEach(g => {
-                    const gWord = '\uFEFF' + buildWordDocumentHtml(buildGradeHtmlForSnapshot(g, snapshot));
-                    perGradeDir.file(`ตารางสอบ_${sanitizeFilename(g.short)}.doc`, gWord);
-                });
-
-                const blob = await zip.generateAsync({ type: 'blob' });
-                const url = URL.createObjectURL(blob);
+                const zipBlob = await zip.generateAsync({ type: 'blob' });
+                const url = URL.createObjectURL(zipBlob);
                 const link = document.createElement('a');
                 link.href = url;
                 link.download = `${safeFolder}.zip`;
