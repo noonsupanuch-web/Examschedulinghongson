@@ -164,6 +164,18 @@
             }
         }
 
+        /* Handover Signature Table Styling */
+        .handover-table th,
+        .handover-table td {
+            border: 1px solid #1f2937;
+            vertical-align: middle;
+        }
+        .handover-table tbody td.sig-row-cell {
+            height: 44px;
+            padding-top: 8px;
+            padding-bottom: 8px;
+        }
+
         .print-only {
             display: none;
         }
@@ -827,6 +839,9 @@
             exportFilterSubject: 'all',
             exportHandoverGrade: 'm1',
             exportHandoverRoom: 'all',
+            exportHandoverDay: 'all',
+            exportHandoverLayout: 'per_day_room', // 'per_day_room' | 'per_day_desk'
+            exportHandoverHideEmpty: true,
             exportTeacherNamesCache: [],
             auditStatusFilter: 'all', // 'all' | 'not_submitted' | 'submitted'
             auditExamModeFilter: 'all', // 'all' | 'in_schedule' | 'outside'
@@ -2813,7 +2828,7 @@
                 `;
             }
 
-            if (!isAdmin) {
+            if (!isAdmin && state.exportMode !== 'grade' && state.exportMode !== 'handover') {
                 state.exportMode = 'grade';
             }
 
@@ -3598,23 +3613,172 @@
             render();
         }
 
-        function buildRoomHandoverTableHtml(grade, roomName, subjectsSource = state.subjects) {
-            const days = getDaysForGrade(grade.id);
+        function getRoomExamRowsForDay(grade, roomName, dayIndex, subjectsSource = state.subjects) {
             const timeSlots = getSlotsForGrade(grade.id);
-            const gradeSubjects = (subjectsSource || []).filter(s => s.gradeId === grade.id && s.dayIndex !== null && s.slotId !== null);
+            const daySubs = (subjectsSource || []).filter(
+                s => s.gradeId === grade.id &&
+                    !isSubjectOutsideSchedule(s) &&
+                    s.dayIndex === dayIndex &&
+                    s.slotId !== null
+            );
 
-            const roomExamItems = [];
-            days.forEach((dayLabel, dIdx) => {
-                const daySubs = gradeSubjects.filter(s => s.dayIndex === dIdx);
-                timeSlots.forEach(slot => {
-                    if (slot.period === 'lunch') return;
-                    const slotSubs = daySubs.filter(s => s.slotId === slot.id);
-                    slotSubs.forEach(sub => {
+            const rows = [];
+            let hasMorning = false;
+            let hasAfternoon = false;
+
+            timeSlots.forEach(slot => {
+                if (slot.period === 'lunch') {
+                    rows.push({ isLunch: true, label: slot.label });
+                    return;
+                }
+                const slotSubs = daySubs.filter(s => s.slotId === slot.id);
+                slotSubs.forEach(sub => {
+                    const roomTeacher = getTeacherForRoomInSubject(sub, roomName);
+                    if (roomTeacher !== null) {
+                        if (slot.period === 'morning') hasMorning = true;
+                        if (slot.period === 'afternoon') hasAfternoon = true;
+                        rows.push({
+                            isLunch: false,
+                            period: slot.period,
+                            timeText: getSlotLabel(slot.id, sub.duration, grade.id),
+                            code: sub.code,
+                            name: getSubjectDisplayName(sub),
+                            duration: sub.duration,
+                            teacher: roomTeacher
+                        });
+                    }
+                });
+            });
+
+            return rows.filter(r => !r.isLunch || (hasMorning && hasAfternoon));
+        }
+
+        function buildRoomDayHandoverSheetHtml(grade, roomName, dayIndex, dayLabel, subjectsSource = state.subjects) {
+            const rows = getRoomExamRowsForDay(grade, roomName, dayIndex, subjectsSource);
+            const examRowsOnly = rows.filter(r => !r.isLunch);
+
+            const logoHtml = state.settings.logoDataUrl
+                ? `<img src="${state.settings.logoDataUrl}" alt="ตราโรงเรียน" class="w-12 h-12 object-contain mx-auto mb-1">`
+                : '';
+
+            let itemSeq = 0;
+            const rowsHtml = examRowsOnly.length > 0
+                ? rows.map(item => {
+                    if (item.isLunch) {
+                        return `
+                            <tr class="lunch-row bg-gray-100">
+                                <td colspan="13" class="border border-gray-800 p-1.5 text-center doc-bold text-xs">
+                                    ${escapeHtml(item.label)}
+                                </td>
+                            </tr>
+                        `;
+                    }
+                    itemSeq++;
+                    return `
+                        <tr>
+                            <td class="sig-row-cell border border-gray-800 p-1.5 text-center">${itemSeq}</td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5 text-center whitespace-nowrap doc-bold">${escapeHtml(item.timeText)}</td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5 text-center doc-bold whitespace-nowrap">${escapeHtml(item.code)}</td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5">${escapeHtml(item.name)}</td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5">${escapeHtml(item.teacher)}</td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5 text-center w-[48px]"></td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5 w-[105px]"></td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5 text-center w-[56px]"></td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5 w-[105px]"></td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5 text-center w-[56px]"></td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5 w-[105px]"></td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5 text-center w-[56px]"></td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5 w-[95px]"></td>
+                        </tr>
+                    `;
+                }).join('')
+                : `<tr><td colspan="13" class="border border-gray-800 p-6 text-center text-gray-500">ไม่มีรายวิชาสอบสำหรับห้อง ${escapeHtml(roomName)} ในวัน${escapeHtml(dayLabel)}</td></tr>`;
+
+            return `
+                <div class="text-center mb-3">
+                    ${logoHtml}
+                    <div class="text-xs font-semibold">${escapeHtml(state.settings.schoolName)}</div>
+                    <div class="text-base sm:text-lg doc-bold mt-0.5">แบบบันทึกการเซ็นรับ - ส่งข้อสอบ (แยกตามวันและห้องสอบ)</div>
+                    <div class="text-xs sm:text-sm doc-bold">การสอบ${escapeHtml(state.settings.examType)} ${escapeHtml(getTermSubtitle())}</div>
+                    <div class="mt-2 inline-block px-4 py-1.5 rounded-xl border-2 border-gray-800 bg-gray-50 text-xs sm:text-sm doc-bold">
+                        วันสอบที่ ${dayIndex + 1} : ${escapeHtml(dayLabel)}
+                        &nbsp;&nbsp;|&nbsp;&nbsp;
+                        ${escapeHtml(grade.name)}
+                        &nbsp;&nbsp;|&nbsp;&nbsp;
+                        <span class="theme-text">ห้องสอบ ${escapeHtml(roomName)}</span>
+                        &nbsp;&nbsp;(${examRowsOnly.length} รายวิชา)
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="handover-table w-full border-collapse border border-gray-800 text-xs">
+                        <thead>
+                            <tr class="bg-gray-100 text-center">
+                                <th rowspan="2" class="border border-gray-800 p-1.5 w-[30px]">ที่</th>
+                                <th rowspan="2" class="border border-gray-800 p-1.5 w-[88px]">เวลาสอบ</th>
+                                <th rowspan="2" class="border border-gray-800 p-1.5 w-[72px]">รหัสวิชา</th>
+                                <th rowspan="2" class="border border-gray-800 p-1.5">รายวิชา</th>
+                                <th rowspan="2" class="border border-gray-800 p-1.5">ครูผู้สอนประจำห้อง</th>
+                                <th rowspan="2" class="border border-gray-800 p-1.5 w-[48px]">จำนวน<br>(ชุด)</th>
+                                <th colspan="2" class="border border-gray-800 p-1 bg-amber-50">1. คุณครูส่งข้อสอบ (ส่งมอบ)</th>
+                                <th colspan="2" class="border border-gray-800 p-1 bg-sky-50">2. คนคุมสอบรับข้อสอบ (ก่อนสอบ)</th>
+                                <th colspan="3" class="border border-gray-800 p-1 bg-emerald-50">3. คนคุมสอบส่งคืนข้อสอบ (หลังสอบเสร็จ)</th>
+                            </tr>
+                            <tr class="bg-gray-100 text-center">
+                                <th class="border border-gray-800 p-1 bg-amber-50">ลงชื่อครูส่งข้อสอบ</th>
+                                <th class="border border-gray-800 p-1 bg-amber-50">เวลาส่ง</th>
+                                <th class="border border-gray-800 p-1 bg-sky-50">ลงชื่อคนคุมสอบ</th>
+                                <th class="border border-gray-800 p-1 bg-sky-50">เวลารับ</th>
+                                <th class="border border-gray-800 p-1 bg-emerald-50">ลงชื่อคนคุมสอบ (ผู้ส่งคืน)</th>
+                                <th class="border border-gray-800 p-1 bg-emerald-50">เวลาส่งคืน</th>
+                                <th class="border border-gray-800 p-1 bg-emerald-50">ลงชื่อผู้รับคืน (ครู/วัดผล)</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rowsHtml}</tbody>
+                    </table>
+                </div>
+                <div class="mt-4 pt-2 flex flex-col sm:flex-row justify-between items-end gap-4 text-xs">
+                    <div>
+                        <div class="doc-bold">คำชี้แจง:</div>
+                        <div>1) คุณครูส่งข้อสอบกรุณานับจำนวนข้อสอบให้ครบตามจำนวนนักเรียนและลงชื่อส่งมอบในช่องที่ 1</div>
+                        <div>2) กรรมการคุมสอบ (คนคุมสอบ) ลงชื่อรับข้อสอบก่อนเข้าห้องสอบในช่องที่ 2 และลงชื่อส่งคืนพร้อมตรวจนับซองคำตอบหลังสอบเสร็จในช่องที่ 3</div>
+                    </div>
+                    <div class="text-center whitespace-nowrap">
+                        <div>ลงชื่อ .................................................................... เจ้าหน้าที่งานวัดผล / ฝ่ายวิชาการ</div>
+                        <div class="mt-1">( .................................................................... ) ประจำวันสอบที่ ${dayIndex + 1}</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function buildDayDeskSummaryHandoverHtml(grade, targetRooms, dayIndex, dayLabel, subjectsSource = state.subjects) {
+            const timeSlots = getSlotsForGrade(grade.id);
+            const daySubs = (subjectsSource || []).filter(
+                s => s.gradeId === grade.id &&
+                    !isSubjectOutsideSchedule(s) &&
+                    s.dayIndex === dayIndex &&
+                    s.slotId !== null
+            );
+
+            const deskRows = [];
+            let hasMorning = false;
+            let hasAfternoon = false;
+
+            timeSlots.forEach(slot => {
+                if (slot.period === 'lunch') {
+                    deskRows.push({ isLunch: true, label: slot.label });
+                    return;
+                }
+                const slotSubs = daySubs.filter(s => s.slotId === slot.id);
+                slotSubs.forEach(sub => {
+                    targetRooms.forEach(roomName => {
                         const roomTeacher = getTeacherForRoomInSubject(sub, roomName);
                         if (roomTeacher !== null) {
-                            roomExamItems.push({
-                                dayLabel,
+                            if (slot.period === 'morning') hasMorning = true;
+                            if (slot.period === 'afternoon') hasAfternoon = true;
+                            deskRows.push({
+                                isLunch: false,
                                 timeText: getSlotLabel(slot.id, sub.duration, grade.id),
+                                roomName,
                                 code: sub.code,
                                 name: getSubjectDisplayName(sub),
                                 teacher: roomTeacher
@@ -3624,69 +3788,87 @@
                 });
             });
 
+            const cleanRows = deskRows.filter(r => !r.isLunch || (hasMorning && hasAfternoon));
+            const examRowsOnly = cleanRows.filter(r => !r.isLunch);
+
             const logoHtml = state.settings.logoDataUrl
-                ? `<img src="${state.settings.logoDataUrl}" alt="ตราโรงเรียน" class="w-14 h-14 object-contain mx-auto mb-1.5">`
+                ? `<img src="${state.settings.logoDataUrl}" alt="ตราโรงเรียน" class="w-12 h-12 object-contain mx-auto mb-1">`
                 : '';
 
-            const rowsHtml = roomExamItems.length > 0
-                ? roomExamItems.map((item, idx) => `
-                    <tr>
-                        <td class="border border-gray-800 p-1.5 text-center">${idx + 1}</td>
-                        <td class="border border-gray-800 p-1.5 whitespace-nowrap">${escapeHtml(item.dayLabel)}</td>
-                        <td class="border border-gray-800 p-1.5 text-center whitespace-nowrap">${escapeHtml(item.timeText)}</td>
-                        <td class="border border-gray-800 p-1.5 text-center doc-bold whitespace-nowrap">${escapeHtml(item.code)}</td>
-                        <td class="border border-gray-800 p-1.5">${escapeHtml(item.name)}</td>
-                        <td class="border border-gray-800 p-1.5">${escapeHtml(item.teacher)}</td>
-                        <td class="border border-gray-800 p-1.5 text-center w-[58px]"></td>
-                        <td class="border border-gray-800 p-1.5 w-[110px]"></td>
-                        <td class="border border-gray-800 p-1.5 text-center w-[62px]"></td>
-                        <td class="border border-gray-800 p-1.5 w-[110px]"></td>
-                        <td class="border border-gray-800 p-1.5 text-center w-[62px]"></td>
-                        <td class="border border-gray-800 p-1.5 w-[85px]"></td>
-                    </tr>
-                `).join('')
-                : `<tr><td colspan="12" class="border border-gray-800 p-6 text-center text-gray-500">ยังไม่มีรายวิชาสอบที่จัดลงตารางสำหรับห้อง ${escapeHtml(roomName)}</td></tr>`;
+            let seq = 0;
+            const trHtml = examRowsOnly.length > 0
+                ? cleanRows.map(item => {
+                    if (item.isLunch) {
+                        return `
+                            <tr class="lunch-row bg-gray-100">
+                                <td colspan="12" class="border border-gray-800 p-1.5 text-center doc-bold text-xs">${escapeHtml(item.label)}</td>
+                            </tr>
+                        `;
+                    }
+                    seq++;
+                    return `
+                        <tr>
+                            <td class="sig-row-cell border border-gray-800 p-1.5 text-center">${seq}</td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5 text-center whitespace-nowrap doc-bold">${escapeHtml(item.timeText)}</td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5 text-center whitespace-nowrap doc-bold">${escapeHtml(item.roomName)}</td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5">
+                                <span class="doc-bold">${escapeHtml(item.code)}</span> ${escapeHtml(item.name)}
+                            </td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5">${escapeHtml(item.teacher)}</td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5 text-center w-[46px]"></td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5 w-[100px]"></td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5 w-[105px]"></td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5 text-center w-[54px]"></td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5 w-[105px]"></td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5 text-center w-[54px]"></td>
+                            <td class="sig-row-cell border border-gray-800 p-1.5 w-[95px]"></td>
+                        </tr>
+                    `;
+                }).join('')
+                : `<tr><td colspan="12" class="border border-gray-800 p-6 text-center text-gray-500">ไม่มีรายวิชาสอบที่จัดลงตารางในวัน${escapeHtml(dayLabel)}</td></tr>`;
 
             return `
                 <div class="text-center mb-3">
                     ${logoHtml}
                     <div class="text-xs font-semibold">${escapeHtml(state.settings.schoolName)}</div>
-                    <div class="text-base sm:text-lg doc-bold mt-0.5">แบบบันทึกการรับ - ส่งข้อสอบ (ประจำห้องสอบ)</div>
+                    <div class="text-base sm:text-lg doc-bold mt-0.5">ตารางคุมการเซ็นรับ - ส่งข้อสอบ (โต๊ะกลางรวมทุกห้อง แยกตามวันสอบ)</div>
                     <div class="text-xs sm:text-sm doc-bold">การสอบ${escapeHtml(state.settings.examType)} ${escapeHtml(getTermSubtitle())}</div>
-                    <div class="text-sm sm:text-base doc-bold theme-text mt-1">
-                        ${escapeHtml(grade.name)} &nbsp;&nbsp;|&nbsp;&nbsp; ห้องสอบ ${escapeHtml(roomName)}
+                    <div class="mt-2 inline-block px-4 py-1.5 rounded-xl border-2 border-gray-800 bg-gray-50 text-xs sm:text-sm doc-bold">
+                        วันสอบที่ ${dayIndex + 1} : ${escapeHtml(dayLabel)}
+                        &nbsp;&nbsp;|&nbsp;&nbsp;
+                        <span class="theme-text">${escapeHtml(grade.name)}</span>
+                        &nbsp;&nbsp;(${targetRooms.length} ห้อง • ${examRowsOnly.length} รายการ)
                     </div>
                 </div>
                 <div class="overflow-x-auto">
-                    <table class="w-full border-collapse border border-gray-800 text-xs">
+                    <table class="handover-table w-full border-collapse border border-gray-800 text-xs">
                         <thead>
                             <tr class="bg-gray-100 text-center">
-                                <th rowspan="2" class="border border-gray-800 p-1.5 w-[32px]">ที่</th>
-                                <th rowspan="2" class="border border-gray-800 p-1.5">วัน/เดือน/ปี</th>
-                                <th rowspan="2" class="border border-gray-800 p-1.5">เวลาสอบ</th>
-                                <th rowspan="2" class="border border-gray-800 p-1.5">รหัสวิชา</th>
-                                <th rowspan="2" class="border border-gray-800 p-1.5">รายวิชา</th>
-                                <th rowspan="2" class="border border-gray-800 p-1.5">ครูผู้สอนประจำห้อง</th>
-                                <th rowspan="2" class="border border-gray-800 p-1.5 w-[58px]">จำนวน<br>(ฉบับ)</th>
-                                <th colspan="2" class="border border-gray-800 p-1">การรับข้อสอบ (ก่อนสอบ)</th>
-                                <th colspan="3" class="border border-gray-800 p-1">การส่งข้อสอบคืน (หลังสอบ)</th>
+                                <th rowspan="2" class="border border-gray-800 p-1.5 w-[28px]">ที่</th>
+                                <th rowspan="2" class="border border-gray-800 p-1.5 w-[86px]">เวลาสอบ</th>
+                                <th rowspan="2" class="border border-gray-800 p-1.5 w-[64px]">ห้องสอบ</th>
+                                <th rowspan="2" class="border border-gray-800 p-1.5">รหัสวิชา / รายวิชา</th>
+                                <th rowspan="2" class="border border-gray-800 p-1.5">ครูผู้สอน</th>
+                                <th rowspan="2" class="border border-gray-800 p-1.5 w-[46px]">จำนวน<br>(ชุด)</th>
+                                <th rowspan="2" class="border border-gray-800 p-1.5 bg-amber-50">ลงชื่อครูส่งข้อสอบ</th>
+                                <th colspan="2" class="border border-gray-800 p-1 bg-sky-50">คนคุมสอบรับข้อสอบ (ก่อนสอบ)</th>
+                                <th colspan="3" class="border border-gray-800 p-1 bg-emerald-50">คนคุมสอบส่งคืนข้อสอบ (หลังสอบ)</th>
                             </tr>
                             <tr class="bg-gray-100 text-center">
-                                <th class="border border-gray-800 p-1">ลงชื่อผู้รับข้อสอบ</th>
-                                <th class="border border-gray-800 p-1">เวลารับ</th>
-                                <th class="border border-gray-800 p-1">ลงชื่อผู้ส่งคืน</th>
-                                <th class="border border-gray-800 p-1">เวลาส่ง</th>
-                                <th class="border border-gray-800 p-1">ผู้ตรวจรับคืน</th>
+                                <th class="border border-gray-800 p-1 bg-sky-50">ลงชื่อคนคุมสอบ</th>
+                                <th class="border border-gray-800 p-1 bg-sky-50">เวลารับ</th>
+                                <th class="border border-gray-800 p-1 bg-emerald-50">ลงชื่อคนคุมสอบ</th>
+                                <th class="border border-gray-800 p-1 bg-emerald-50">เวลาส่งคืน</th>
+                                <th class="border border-gray-800 p-1 bg-emerald-50">ผู้ตรวจรับคืน</th>
                             </tr>
                         </thead>
-                        <tbody>${rowsHtml}</tbody>
+                        <tbody>${trHtml}</tbody>
                     </table>
                 </div>
-                <div class="mt-5 pt-2 flex flex-col sm:flex-row justify-between items-end gap-4 text-xs">
-                    <div>หมายเหตุ: กรรมการคุมสอบกรุณาตรวจนับจำนวนกระดาษคำตอบและซองข้อสอบให้ครบถ้วนก่อนลงชื่อรับ-ส่งทุกครั้ง</div>
+                <div class="mt-4 pt-2 flex justify-end text-xs">
                     <div class="text-center whitespace-nowrap">
-                        <div>ลงชื่อ .................................................................... เจ้าหน้าที่งานวัดผล / วิชาการ</div>
-                        <div class="mt-1">( .................................................................... )</div>
+                        <div>ลงชื่อ .................................................................... หัวหน้างานวัดผล / เจ้าหน้าที่คุมโต๊ะกลาง</div>
+                        <div class="mt-1">( .................................................................... ) ประจำวันสอบที่ ${dayIndex + 1}</div>
                     </div>
                 </div>
             `;
@@ -3699,78 +3881,207 @@
             }
             const grade = getGradeObj(state.exportHandoverGrade);
             const allRooms = getRoomsForGrade(grade.id);
+            const allDays = getDaysForGrade(grade.id);
+
+            if (state.exportHandoverDay !== 'all' && Number(state.exportHandoverDay) >= allDays.length) {
+                state.exportHandoverDay = 'all';
+            }
 
             const gradeOptions = gradeGroups.map(g =>
                 `<option value="${g.id}" ${g.id === grade.id ? 'selected' : ''}>${escapeHtml(g.name)}</option>`
             ).join('');
 
-            const roomOptions = `<option value="all">แสดงทุกห้องสอบในกลุ่มนี้ (${allRooms.length} ห้อง)</option>` +
+            const dayOptions = `<option value="all" ${state.exportHandoverDay === 'all' ? 'selected' : ''}>แสดงทุกวันสอบแยกทีละวัน (${allDays.length} วัน)</option>` +
+                allDays.map((dLabel, dIdx) =>
+                    `<option value="${dIdx}" ${String(state.exportHandoverDay) === String(dIdx) ? 'selected' : ''}>วันสอบที่ ${dIdx + 1} : ${escapeHtml(dLabel)}</option>`
+                ).join('');
+
+            const roomOptions = `<option value="all" ${state.exportHandoverRoom === 'all' ? 'selected' : ''}>แสดงทุกห้องสอบในกลุ่มนี้ (${allRooms.length} ห้อง)</option>` +
                 allRooms.map(r => `<option value="${escapeHtml(r)}" ${state.exportHandoverRoom === r ? 'selected' : ''}>ห้องสอบ ${escapeHtml(r)}</option>`).join('');
+
+            const targetDays = state.exportHandoverDay === 'all'
+                ? allDays.map((label, idx) => ({ idx, label }))
+                : [{ idx: Number(state.exportHandoverDay), label: allDays[Number(state.exportHandoverDay)] }].filter(d => d.label !== undefined);
 
             const targetRooms = state.exportHandoverRoom === 'all'
                 ? allRooms
                 : allRooms.filter(r => r === state.exportHandoverRoom);
 
-            const cardsHtml = targetRooms.map((roomName, idx) => {
-                const sectionId = `handover-sec-${grade.id}-${idx}`;
-                const safeRoomFile = sanitizeFilename(roomName);
-                return `
-                    <div id="${sectionId}" class="printable-section page-break bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6 print-card export-doc-area">
-                        <div class="flex flex-wrap items-center justify-end gap-2 mb-3 no-print no-capture">
-                            <button type="button" onclick="exportSectionAsWordDoc('${sectionId}', 'ใบรับส่งข้อสอบ_${safeRoomFile}')"
-                                class="px-3.5 py-2 rounded-xl text-xs font-bold bg-blue-700 hover:bg-blue-800 text-white shadow-sm transition flex items-center gap-1.5">
-                                <i class="fas fa-file-word"></i> Word (.doc) ห้องนี้
-                            </button>
-                            <button type="button" onclick="downloadSectionAsPNG('${sectionId}', 'ใบรับส่งข้อสอบ_${safeRoomFile}')"
-                                class="px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition flex items-center gap-1.5">
-                                <i class="fas fa-image"></i> PNG ห้องนี้
-                            </button>
-                            <button type="button" onclick="printSingleSection('${sectionId}')"
-                                class="px-3.5 py-2 rounded-xl text-xs font-bold bg-gray-800 hover:bg-gray-900 text-white shadow-sm transition flex items-center gap-1.5">
-                                <i class="fas fa-print"></i> PDF / พิมพ์ห้องนี้
-                            </button>
+            const dayGroupsHtml = targetDays.map(dayObj => {
+                const dayGroupId = `handover-day-group-${grade.id}-d${dayObj.idx}`;
+                const safeDayFile = sanitizeFilename(`วันที่${dayObj.idx + 1}_${dayObj.label}`);
+
+                if (state.exportHandoverLayout === 'per_day_desk') {
+                    const secId = `handover-desk-${grade.id}-d${dayObj.idx}`;
+                    return `
+                        <div id="${dayGroupId}" class="space-y-4">
+                            <div class="rounded-2xl bg-slate-800 text-white px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 no-print shadow-sm">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="px-2.5 py-1 rounded-lg bg-amber-400 text-slate-950 font-bold text-xs">วันสอบที่ ${dayObj.idx + 1}</span>
+                                    <span class="font-bold text-sm sm:text-base">${escapeHtml(dayObj.label)}</span>
+                                    <span class="text-xs text-white/75">(ตารางโต๊ะกลางรวมทุกห้อง)</span>
+                                </div>
+                                <div class="flex flex-wrap gap-1.5">
+                                    <button type="button" onclick="exportSectionAsWordDoc('${secId}', 'ใบรับส่งข้อสอบ_โต๊ะกลาง_${sanitizeFilename(grade.short)}_${safeDayFile}', true)"
+                                        class="px-3 py-1.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white transition flex items-center gap-1">
+                                        <i class="fas fa-file-word"></i> Word (.doc) วันนี้
+                                    </button>
+                                    <button type="button" onclick="downloadSectionAsPNG('${secId}', 'ใบรับส่งข้อสอบ_โต๊ะกลาง_${sanitizeFilename(grade.short)}_${safeDayFile}')"
+                                        class="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition flex items-center gap-1">
+                                        <i class="fas fa-image"></i> PNG วันนี้
+                                    </button>
+                                    <button type="button" onclick="printSingleSection('${secId}', true)"
+                                        class="px-3 py-1.5 rounded-xl text-xs font-bold bg-white/15 hover:bg-white/25 text-white transition flex items-center gap-1">
+                                        <i class="fas fa-print"></i> PDF / พิมพ์วันนี้
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="${secId}" class="printable-section page-break bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6 print-card export-doc-area">
+                                ${buildDayDeskSummaryHandoverHtml(grade, targetRooms, dayObj.idx, dayObj.label)}
+                            </div>
                         </div>
-                        ${buildRoomHandoverTableHtml(grade, roomName)}
+                    `;
+                }
+
+                // โหมดหลัก: แยกตามวัน -> แยกทีละห้อง (1 ห้อง / 1 วัน / 1 หน้า)
+                const visibleRooms = targetRooms.filter(roomName => {
+                    if (!state.exportHandoverHideEmpty || state.exportHandoverRoom !== 'all') return true;
+                    const examCount = getRoomExamRowsForDay(grade, roomName, dayObj.idx).filter(r => !r.isLunch).length;
+                    return examCount > 0;
+                });
+
+                const roomCardsHtml = visibleRooms.map((roomName, rIdx) => {
+                    const sectionId = `handover-sec-${grade.id}-d${dayObj.idx}-r${rIdx}`;
+                    const safeRoomFile = sanitizeFilename(`${roomName}_${safeDayFile}`);
+                    return `
+                        <div id="${sectionId}" class="printable-section page-break bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6 print-card export-doc-area">
+                            <div class="flex flex-wrap items-center justify-between gap-2 mb-3 pb-2 border-b border-gray-100 no-print no-capture">
+                                <div class="flex items-center gap-2 text-xs font-bold text-gray-700">
+                                    <span class="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900">วันสอบที่ ${dayObj.idx + 1}</span>
+                                    <span class="px-2 py-0.5 rounded-md bg-blue-100 text-blue-900">ห้อง ${escapeHtml(roomName)}</span>
+                                </div>
+                                <div class="flex flex-wrap items-center gap-1.5">
+                                    <button type="button" onclick="exportSectionAsWordDoc('${sectionId}', 'ใบเซ็นรับส่งข้อสอบ_${safeRoomFile}', true)"
+                                        class="px-3 py-1.5 rounded-xl text-xs font-bold bg-blue-700 hover:bg-blue-800 text-white shadow-sm transition flex items-center gap-1">
+                                        <i class="fas fa-file-word"></i> Word (.doc) ใบนี้
+                                    </button>
+                                    <button type="button" onclick="downloadSectionAsPNG('${sectionId}', 'ใบเซ็นรับส่งข้อสอบ_${safeRoomFile}')"
+                                        class="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition flex items-center gap-1">
+                                        <i class="fas fa-image"></i> PNG ใบนี้
+                                    </button>
+                                    <button type="button" onclick="printSingleSection('${sectionId}', true)"
+                                        class="px-3 py-1.5 rounded-xl text-xs font-bold bg-gray-800 hover:bg-gray-900 text-white shadow-sm transition flex items-center gap-1">
+                                        <i class="fas fa-print"></i> PDF / พิมพ์ใบนี้
+                                    </button>
+                                </div>
+                            </div>
+                            ${buildRoomDayHandoverSheetHtml(grade, roomName, dayObj.idx, dayObj.label)}
+                        </div>
+                    `;
+                }).join('');
+
+                return `
+                    <div id="${dayGroupId}" class="space-y-4">
+                        <div class="rounded-2xl bg-slate-800 text-white px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 no-print shadow-sm">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <span class="px-2.5 py-1 rounded-lg bg-amber-400 text-slate-950 font-bold text-xs">วันสอบที่ ${dayObj.idx + 1}</span>
+                                <span class="font-bold text-sm sm:text-base">${escapeHtml(dayObj.label)}</span>
+                                <span class="text-xs text-white/80">(${visibleRooms.length} ห้องสอบที่มีสอบวันนี้)</span>
+                            </div>
+                            ${visibleRooms.length > 0 ? `
+                                <div class="flex flex-wrap gap-1.5">
+                                    <button type="button" onclick="exportDayGroupAsWordDoc('${dayGroupId}', 'ใบเซ็นรับส่งข้อสอบ_${sanitizeFilename(grade.short)}_${safeDayFile}')"
+                                        class="px-3 py-1.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white transition flex items-center gap-1.5">
+                                        <i class="fas fa-file-word"></i> ส่งออก Word (.doc) เฉพาะวันนี้ (${visibleRooms.length} ห้อง)
+                                    </button>
+                                    <button type="button" onclick="exportHandoverDayCSV(${dayObj.idx})"
+                                        class="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition flex items-center gap-1.5">
+                                        <i class="fas fa-file-csv"></i> CSV วันนี้
+                                    </button>
+                                    <button type="button" onclick="printDayGroup('${dayGroupId}', true)"
+                                        class="px-3 py-1.5 rounded-xl text-xs font-bold bg-white/15 hover:bg-white/25 text-white transition flex items-center gap-1.5">
+                                        <i class="fas fa-print"></i> พิมพ์ / PDF เฉพาะวันนี้
+                                    </button>
+                                </div>
+                            ` : ''}
+                        </div>
+                        ${roomCardsHtml || `
+                            <div class="bg-white rounded-2xl border border-dashed border-gray-300 p-6 text-center text-xs sm:text-sm text-gray-500 no-print">
+                                ไม่มีห้องสอบที่มีรายวิชาจัดลงตารางในวันสอบที่ ${dayObj.idx + 1} (${escapeHtml(dayObj.label)})
+                            </div>
+                        `}
                     </div>
                 `;
             }).join('');
 
             return `
                 <div class="space-y-5">
-                    <div class="bg-white rounded-2xl shadow-sm border border-amber-200 p-4 space-y-3 no-print">
-                        <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    <div class="bg-white rounded-2xl shadow-sm border border-amber-200 p-4 space-y-3.5 no-print">
+                        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                             <div>
                                 <div class="text-xs sm:text-sm font-bold text-gray-800 flex items-center gap-1.5">
-                                    <i class="fas fa-file-signature text-amber-600"></i> เลือกระดับชั้นและห้องสอบสำหรับใบเซ็นรับ-ส่งข้อสอบ
+                                    <i class="fas fa-file-signature text-amber-600"></i> ใบเซ็นรับ-ส่งข้อสอบแต่ละห้อง (แยกตามวันสอบอย่างชัดเจน)
                                 </div>
                                 <div class="text-xs text-gray-500 mt-0.5">
-                                    ระบบจะแสดงเฉพาะวิชาและครูผู้สอนของห้องนั้นๆ (รวมถึงวิชาที่สอบเพิ่มเฉพาะห้องเดียว) แยก 1 ห้องต่อ 1 หน้า A4
+                                    จัดรูปแบบกระดาษแนวนอน (A4 Landscape) พร้อมช่องเซ็นแยกชัดเจนระหว่าง <strong>1. ครูส่งข้อสอบ</strong>, <strong>2. คนคุมสอบรับข้อสอบ</strong> และ <strong>3. คนคุมสอบส่งคืนหลังสอบ</strong>
                                 </div>
                             </div>
-                            <div class="flex flex-col sm:flex-row gap-2">
-                                <select onchange="state.exportHandoverGrade=this.value; state.exportHandoverRoom='all'; render();"
-                                    class="border border-gray-300 rounded-xl px-3 py-2 text-xs sm:text-sm bg-white outline-none">
+                            <div class="flex flex-wrap gap-2">
+                                <button type="button" onclick="state.exportHandoverLayout='per_day_room'; render();"
+                                    class="px-3 py-2 rounded-xl text-xs font-bold transition border ${state.exportHandoverLayout === 'per_day_room' ? 'theme-btn border-transparent shadow-sm' : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'}">
+                                    <i class="fas fa-door-open mr-1"></i>แยก 1 ห้อง / 1 วัน (1 หน้าต่อห้อง)
+                                </button>
+                                <button type="button" onclick="state.exportHandoverLayout='per_day_desk'; render();"
+                                    class="px-3 py-2 rounded-xl text-xs font-bold transition border ${state.exportHandoverLayout === 'per_day_desk' ? 'theme-btn border-transparent shadow-sm' : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'}">
+                                    <i class="fas fa-table mr-1"></i>ตารางโต๊ะกลางรวมทุกห้อง (แยกตามวัน)
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                            <div>
+                                <label class="block text-[11px] font-bold text-gray-600 mb-1">1. ระดับชั้น / กลุ่มห้องสอบ</label>
+                                <select onchange="state.exportHandoverGrade=this.value; state.exportHandoverRoom='all'; state.exportHandoverDay='all'; render();"
+                                    class="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs sm:text-sm bg-white outline-none">
                                     ${gradeOptions}
                                 </select>
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-bold text-gray-600 mb-1">2. เลือกวันสอบ</label>
+                                <select onchange="state.exportHandoverDay=this.value; render();"
+                                    class="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs sm:text-sm bg-white outline-none">
+                                    ${dayOptions}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-bold text-gray-600 mb-1">3. เลือกห้องสอบ</label>
                                 <select onchange="state.exportHandoverRoom=this.value; render();"
-                                    class="border border-gray-300 rounded-xl px-3 py-2 text-xs sm:text-sm bg-white outline-none">
+                                    class="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs sm:text-sm bg-white outline-none">
                                     ${roomOptions}
                                 </select>
                             </div>
                         </div>
 
-                        <div class="pt-2 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center gap-2">
-                            <label class="text-xs font-bold text-gray-600 whitespace-nowrap">รายชื่อห้องสอบใน ${escapeHtml(grade.short)}:</label>
-                            <input type="text" id="handover-rooms-input" value="${escapeHtml(allRooms.join(', '))}"
-                                placeholder="เช่น ม.1/1, ม.1/2, ม.1/3"
-                                class="flex-grow border border-gray-300 rounded-xl px-3 py-1.5 text-xs outline-none">
-                            <button type="button" onclick="updateGradeRoomsListFromInput()"
-                                class="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white transition flex-shrink-0">
-                                <i class="fas fa-save mr-1"></i>อัปเดตรายชื่อห้อง
-                            </button>
+                        <div class="pt-2.5 border-t border-gray-100 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+                            <div class="flex flex-col sm:flex-row sm:items-center gap-2 flex-grow">
+                                <label class="text-xs font-bold text-gray-600 whitespace-nowrap">รายชื่อห้องสอบใน ${escapeHtml(grade.short)}:</label>
+                                <input type="text" id="handover-rooms-input" value="${escapeHtml(allRooms.join(', '))}"
+                                    placeholder="เช่น ม.1/1, ม.1/2, ม.1/3"
+                                    class="flex-grow border border-gray-300 rounded-xl px-3 py-1.5 text-xs outline-none">
+                                <button type="button" onclick="updateGradeRoomsListFromInput()"
+                                    class="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white transition flex-shrink-0">
+                                    <i class="fas fa-save mr-1"></i>อัปเดตรายชื่อห้อง
+                                </button>
+                            </div>
+                            <label class="flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer whitespace-nowrap">
+                                <input type="checkbox" ${state.exportHandoverHideEmpty ? 'checked' : ''}
+                                    onchange="state.exportHandoverHideEmpty=this.checked; render();"
+                                    class="w-4 h-4 rounded accent-amber-600">
+                                ซ่อนห้องที่ไม่มีสอบในวันนั้น
+                            </label>
                         </div>
                     </div>
-                    ${cardsHtml}
+                    ${dayGroupsHtml}
                 </div>
             `;
         }
@@ -3789,6 +4100,7 @@
             try {
                 showToast('กำลังสร้างรูปภาพความละเอียดสูง...', 'info');
                 stage.innerHTML = '';
+                stage.style.width = state.exportMode === 'handover' ? '1220px' : '960px';
                 const clone = sourceEl.cloneNode(true);
                 clone.id = 'png-clone-temp';
                 clone.classList.add('capturing-png', 'export-doc-area');
@@ -3820,7 +4132,20 @@
             }
         }
 
-        function printSingleSection(sectionId) {
+        function setDynamicPrintOrientation(isLandscape) {
+            let styleEl = document.getElementById('dynamic-print-orientation');
+            if (!styleEl) {
+                styleEl = document.createElement('style');
+                styleEl.id = 'dynamic-print-orientation';
+                document.head.appendChild(styleEl);
+            }
+            styleEl.textContent = isLandscape
+                ? '@media print { @page { size: A4 landscape; margin: 0.8cm; } }'
+                : '@media print { @page { size: A4 portrait; margin: 1.2cm; } }';
+        }
+
+        function printSingleSection(sectionId, forceLandscape = false) {
+            setDynamicPrintOrientation(forceLandscape || state.exportMode === 'handover');
             document.querySelectorAll('.printable-section').forEach(el => el.classList.remove('print-target'));
             const target = document.getElementById(sectionId);
             if (!target) return;
@@ -3833,13 +4158,33 @@
             }, 500);
         }
 
+        function printDayGroup(dayGroupId, forceLandscape = true) {
+            const container = document.getElementById(dayGroupId);
+            if (!container) return;
+            const targets = Array.from(container.querySelectorAll('.printable-section'));
+            if (targets.length === 0) {
+                showToast('ไม่พบใบเซ็นสำหรับพิมพ์ในวันสอบนี้', 'warning');
+                return;
+            }
+            setDynamicPrintOrientation(forceLandscape);
+            document.querySelectorAll('.printable-section').forEach(el => el.classList.remove('print-target'));
+            targets.forEach(el => el.classList.add('print-target'));
+            document.body.classList.add('printing-single');
+            window.print();
+            setTimeout(() => {
+                document.body.classList.remove('printing-single');
+                targets.forEach(el => el.classList.remove('print-target'));
+            }, 500);
+        }
+
         function printAllSections() {
+            setDynamicPrintOrientation(state.exportMode === 'handover');
             document.body.classList.remove('printing-single');
             window.print();
         }
 
         // Microsoft Word (.doc) Export
-        function buildWordDocumentHtml(innerHtmlContent) {
+        function buildWordDocumentHtml(innerHtmlContent, isLandscape = false) {
             const fontObj = EXPORT_FONTS.find(f => f.value === state.settings.exportFont) || EXPORT_FONTS[0];
             const fontFamily = `${fontObj.wordName}, ${state.settings.exportFont}`;
             const fontSize = state.settings.exportFontSize || '14px';
@@ -3854,16 +4199,20 @@
                     <meta charset="utf-8">
                     <title>${escapeHtml(getExamMainTitle())}</title>
                     <style>
-                        @page {
-                            size: A4 portrait;
-                            margin: 1.5cm 1.5cm 1.5cm 1.5cm;
+                        @page WordSection1 {
+                            size: ${isLandscape ? '29.7cm 21.0cm' : '21.0cm 29.7cm'};
+                            mso-page-orientation: ${isLandscape ? 'landscape' : 'portrait'};
+                            margin: ${isLandscape ? '1.0cm 1.0cm 1.0cm 1.0cm' : '1.5cm 1.5cm 1.5cm 1.5cm'};
+                        }
+                        div.WordSection1 {
+                            page: WordSection1;
                         }
                         body {
                             font-family: ${fontFamily};
-                            font-size: ${fontSize};
+                            font-size: ${isLandscape ? '12px' : fontSize};
                             color: ${textColor};
                             font-weight: ${fontWeight};
-                            line-height: 1.35;
+                            line-height: 1.3;
                         }
                         .text-center { text-align: center; }
                         .text-left { text-align: left; }
@@ -3873,16 +4222,21 @@
                             width: 100%;
                             border-collapse: collapse;
                             margin-top: 8px;
-                            margin-bottom: 14px;
+                            margin-bottom: 12px;
                             font-family: ${fontFamily};
-                            font-size: ${fontSize};
+                            font-size: ${isLandscape ? '11.5px' : fontSize};
                             color: ${textColor};
                             font-weight: ${fontWeight};
                         }
                         th, td {
                             border: 1px solid #000000;
-                            padding: 5px 6px;
+                            padding: 5px 5px;
                             vertical-align: middle;
+                        }
+                        .handover-table tbody td.sig-row-cell {
+                            height: 32pt;
+                            padding-top: 7px;
+                            padding-bottom: 7px;
                         }
                         th {
                             background-color: #f3f4f6;
@@ -3894,21 +4248,23 @@
                             text-align: center;
                         }
                         img {
-                            width: 64px;
-                            height: 64px;
+                            width: 56px;
+                            height: 56px;
                             object-fit: contain;
                         }
                     </style>
                 </head>
                 <body>
-                    ${innerHtmlContent}
+                    <div class="WordSection1">
+                        ${innerHtmlContent}
+                    </div>
                 </body>
                 </html>
             `;
         }
 
-        function triggerWordDownload(filenameBase, htmlBody) {
-            const docHtml = buildWordDocumentHtml(htmlBody);
+        function triggerWordDownload(filenameBase, htmlBody, isLandscape = false) {
+            const docHtml = buildWordDocumentHtml(htmlBody, isLandscape);
             const blob = new Blob(['\uFEFF' + docHtml], { type: 'application/msword;charset=utf-8' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
@@ -3919,18 +4275,113 @@
             showToast(`ดาวน์โหลดไฟล์ ${filenameBase}.doc เรียบร้อยแล้ว`, 'success');
         }
 
-        function exportSectionAsWordDoc(sectionId, filenameBase) {
+        function exportSectionAsWordDoc(sectionId, filenameBase, isLandscape = false) {
             const sourceEl = document.getElementById(sectionId);
             if (!sourceEl) return;
             const clone = sourceEl.cloneNode(true);
             clone.querySelectorAll('.no-print, .no-capture, button').forEach(el => el.remove());
-            triggerWordDownload(filenameBase, clone.innerHTML);
+            triggerWordDownload(filenameBase, clone.innerHTML, isLandscape || state.exportMode === 'handover');
+        }
+
+        function exportDayGroupAsWordDoc(dayGroupId, filenameBase) {
+            const container = document.getElementById(dayGroupId);
+            if (!container) return;
+            const sections = Array.from(container.querySelectorAll('.printable-section'));
+            if (sections.length === 0) {
+                showToast('ไม่พบข้อมูลใบเซ็นสำหรับส่งออกในวันนี้', 'warning');
+                return;
+            }
+            const combinedHtml = sections.map((sec, idx) => {
+                const clone = sec.cloneNode(true);
+                clone.querySelectorAll('.no-print, .no-capture, button').forEach(el => el.remove());
+                const pageBreak = idx < sections.length - 1 ? '<br clear="all" style="page-break-before:always" />' : '';
+                return `<div>${clone.innerHTML}</div>${pageBreak}`;
+            }).join('');
+            triggerWordDownload(filenameBase, combinedHtml, true);
         }
 
         function exportAllAsWordDoc() {
             const sections = Array.from(document.querySelectorAll('.printable-section'));
             if (sections.length === 0) {
                 showToast('ไม่พบข้อมูลตารางสำหรับส่งออก', 'warning');
+                return;
+            }
+            const isHandover = state.exportMode === 'handover';
+            const combinedHtml = sections.map((sec, idx) => {
+                const clone = sec.cloneNode(true);
+                clone.querySelectorAll('.no-print, .no-capture, button').forEach(el => el.remove());
+                const pageBreak = idx < sections.length - 1 ? '<br clear="all" style="page-break-before:always" />' : '';
+                return `<div>${clone.innerHTML}</div>${pageBreak}`;
+            }).join('');
+
+            const baseName = isHandover
+                ? `ใบเซ็นรับส่งข้อสอบ_${sanitizeFilename(getGradeObj(state.exportHandoverGrade).short)}_แยกตามวัน`
+                : `ตารางสอบ${state.settings.examType}_ทั้งหมด`;
+            triggerWordDownload(baseName, combinedHtml, isHandover);
+        }
+
+        function exportHandoverDayCSV(specificDayIdx = null) {
+            const grade = getGradeObj(state.exportHandoverGrade);
+            const allRooms = getRoomsForGrade(grade.id);
+            const targetRooms = state.exportHandoverRoom === 'all' ? allRooms : allRooms.filter(r => r === state.exportHandoverRoom);
+            const allDays = getDaysForGrade(grade.id);
+
+            const targetDays = specificDayIdx !== null
+                ? [{ idx: specificDayIdx, label: allDays[specificDayIdx] }]
+                : (state.exportHandoverDay === 'all'
+                    ? allDays.map((label, idx) => ({ idx, label }))
+                    : [{ idx: Number(state.exportHandoverDay), label: allDays[Number(state.exportHandoverDay)] }]);
+
+            const headers = [
+                'วันสอบที่',
+                'วัน/เดือน/ปี',
+                'ห้องสอบ',
+                'เวลาสอบ',
+                'รหัสวิชา',
+                'รายวิชา',
+                'ครูผู้สอนประจำห้อง',
+                'จำนวนข้อสอบ(ชุด)',
+                'ลงชื่อครูส่งข้อสอบ',
+                'เวลาส่ง(ครู)',
+                'ลงชื่อคนคุมสอบ(รับก่อนสอบ)',
+                'เวลารับ',
+                'ลงชื่อคนคุมสอบ(ส่งคืนหลังสอบ)',
+                'เวลาส่งคืน',
+                'ลงชื่อผู้ตรวจรับคืน'
+            ];
+            const rows = [];
+            targetDays.forEach(dayObj => {
+                if (!dayObj || dayObj.label === undefined) return;
+                targetRooms.forEach(roomName => {
+                    const roomRows = getRoomExamRowsForDay(grade, roomName, dayObj.idx).filter(r => !r.isLunch);
+                    roomRows.forEach(item => {
+                        rows.push([
+                            `วันที่ ${dayObj.idx + 1}`,
+                            dayObj.label,
+                            roomName,
+                            item.timeText,
+                            item.code,
+                            item.name,
+                            item.teacher,
+                            '', '', '', '', '', '', '', ''
+                        ]);
+                    });
+                });
+            });
+
+            const suffix = specificDayIdx !== null
+                ? `วันที่${specificDayIdx + 1}`
+                : (state.exportHandoverDay === 'all' ? 'ทุกวันสอบ' : `วันที่${Number(state.exportHandoverDay) + 1}`);
+            downloadCSV(`ใบเซ็นรับส่งข้อสอบ_${grade.short}_${suffix}.csv`, headers, rows);
+        }
+
+        function exportCurrentModeCSV() {
+            if (state.exportMode === 'audit') {
+                exportTeacherAuditCSV('teachers');
+                return;
+            }
+            if (state.exportMode === 'handover') {
+                exportHandoverDayCSV(null);
                 return;
             }
             const combinedHtml = sections.map((sec, idx) => {
@@ -5170,8 +5621,16 @@
             const allHandoverBlocks = [];
             grades.forEach(g => {
                 const rooms = (Array.isArray(g.roomsList) && g.roomsList.length > 0) ? g.roomsList : inferDefaultRoomsForGrade(g);
-                rooms.forEach(rName => {
-                    allHandoverBlocks.push(buildRoomHandoverTableHtml(g, rName, subjects));
+                const gDays = (g.useCustomDays && g.customDays.length > 0)
+                    ? g.customDays
+                    : (g.level === 'upper' ? settings.upperDays : settings.lowerDays);
+                gDays.forEach((dayLabel, dIdx) => {
+                    rooms.forEach(rName => {
+                        const hasExam = getRoomExamRowsForDay(g, rName, dIdx, subjects).some(r => !r.isLunch);
+                        if (hasExam) {
+                            allHandoverBlocks.push(buildRoomDayHandoverSheetHtml(g, rName, dIdx, dayLabel, subjects));
+                        }
+                    });
                 });
             });
             const allHandoverWordBody = allHandoverBlocks.map((html, idx) => {
@@ -5210,7 +5669,7 @@
                 root.file('05_รายชื่อและรหัสผ่านผู้ใช้.csv', buildCsvString(['username', 'password', 'name', 'department', 'role'], userCsvRows));
                 root.file('06_ข้อมูลสำรองเต็มรูปแบบ_Backup.json', JSON.stringify(snapshot, null, 2));
                 if (allHandoverWordBody) {
-                    root.file('07_ใบเซ็นรับส่งข้อสอบแต่ละห้อง.doc', '\uFEFF' + buildWordDocumentHtml(allHandoverWordBody));
+                    root.file('07_ใบเซ็นรับส่งข้อสอบแต่ละห้อง_แยกตามวัน.doc', '\uFEFF' + buildWordDocumentHtml(allHandoverWordBody, true));
                 }
                 const auditData = buildTeacherSubmissionAuditData(subjects, users);
                 const auditCsvRows = auditData.teacherRecords.map((rec, idx) => [
